@@ -178,7 +178,7 @@ export default function Home() {
   // Settings configuration for UI rendering
   const cleaningOptions = [
     { key: 'removeEndnotes' as const, label: 'Remove endnotes' },
-    { key: 'removeFootnotes' as const, label: 'Remove footnotes' },
+    { key: 'removeFootnotes' as const, label: 'Remove afterword' },
     { key: 'removeChapterNotes' as const, label: 'Remove chapter notes' },
     { key: 'removeSummary' as const, label: 'Remove summary' },
     { key: 'removeImages' as const, label: 'Remove images' },

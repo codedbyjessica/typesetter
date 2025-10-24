@@ -236,11 +236,22 @@ function removeEndnotes($: cheerio.CheerioAPI): void {
 }
 
 /**
- * Removes footnotes from the document
+ * Removes afterword sections from the document
  */
 function removeFootnotes($: cheerio.CheerioAPI): void {
-  $('.footnotes, #footnotes, [class*="footnote"]').remove();
-  $('a[href^="#fn"], sup a[href^="#"]').remove();
+  // Remove afterword sections (AO3 format)
+  $('.afterword').remove();
+  
+  // Remove series links
+  $('#series, .series.module').remove();
+  
+  // Also remove any divs containing "Series this work belongs to"
+  $('div').each(function() {
+    const text = $(this).text().trim();
+    if (text.includes('Series this work belongs to')) {
+      $(this).remove();
+    }
+  });
 }
 
 /**
@@ -973,7 +984,7 @@ function generateStyledHtml(bodyContent: string, options: CleanHtmlOptions, titl
         /* Dinkus (section break) */
         .dinkus {
           text-align: center;
-          margin: 1em 0;
+          margin: 0.75em 0;
           font-size: ${options.fontSize}pt;
         }
         
