@@ -13,3 +13,22 @@ pdf book pages rules:
 - page 3: IF there is a second title and author, in the font size of the book, no bolding wrapped in a div, and centered on the page, horizontally and vertically, IF NOT, repeat h1 title and .author in the book text size
 - page 4: blank
 - page 5: summary if keeping + one blank page, otherwise STORY STARTS
+
+
+## Code Editing Guidelines
+
+### Preservation Rules
+- NEVER remove existing UI sections, features, or functionality unless explicitly requested
+- When making changes to a file, preserve all existing content that is not directly related to the requested change
+- If a change requires modifying code near other sections, ensure those sections remain intact
+
+### UI-Specific Rules
+- UI sections are often organized in groups (headers, page numbers, formatting, etc.)
+- When editing one UI section, verify adjacent sections are preserved in the replacement
+- Check that closing tags, divs, and component wrappers remain balanced
+- If a section seems to be missing after an edit, immediately add it back
+
+### Verification Steps
+- After any file edit, check that no unintended sections were removed
+- If multiple similar sections exist (like checkboxes, radio buttons), ensure all are preserved unless specifically targeted
+- Read the diff carefully before submitting changes

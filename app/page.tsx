@@ -177,10 +177,10 @@ export default function Home() {
 
   // Settings configuration for UI rendering
   const cleaningOptions = [
-    { key: 'removeEndnotes' as const, label: 'Remove endnotes' },
-    { key: 'removeFootnotes' as const, label: 'Remove afterword' },
-    { key: 'removeChapterNotes' as const, label: 'Remove chapter notes' },
     { key: 'removeSummary' as const, label: 'Remove summary' },
+    { key: 'removeChapterNotes' as const, label: 'Remove chapter notes' },
+    { key: 'removeEndnotes' as const, label: 'Remove chapter endnotes' },
+    { key: 'removeFootnotes' as const, label: 'Remove afterword' },
     { key: 'removeImages' as const, label: 'Remove images' },
   ];
 
@@ -887,6 +887,44 @@ export default function Home() {
                     onChange={(value) => updateSetting('dinkusSymbol', value)}
                     placeholder="***"
                   />
+
+
+                  {/* Headers */}
+                  <div className="border-t border-slate-200 pt-4 mt-4">
+                    <Checkbox
+                      checked={settings.showHeaders}
+                      onChange={(checked) => updateSetting('showHeaders', checked)}
+                      label="Show Headers (Title on odd pages, Author on even pages)"
+                    />
+                    {settings.showHeaders && (
+                      <div className="ml-6 mt-3 space-y-2">
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <input
+                            type="radio"
+                            name="headerOption"
+                            checked={!settings.hideHeadersUntilChapter1}
+                            onChange={() => {
+                              updateSetting('hideHeadersUntilChapter1', false);
+                            }}
+                            className="w-4 h-4 text-slate-700 focus:ring-2 focus:ring-slate-500"
+                          />
+                          <span className="text-sm text-slate-700">Show on all pages</span>
+                        </label>
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <input
+                            type="radio"
+                            name="headerOption"
+                            checked={settings.hideHeadersUntilChapter1}
+                            onChange={() => {
+                              updateSetting('hideHeadersUntilChapter1', true);
+                            }}
+                            className="w-4 h-4 text-slate-700 focus:ring-2 focus:ring-slate-500"
+                          />
+                          <span className="text-sm text-slate-700">Hide until Chapter 1</span>
+                        </label>
+                      </div>
+                    )}
+                  </div>
                   
                   {/* Page Numbers */}
                   <div className="border-t border-slate-200 pt-4 mt-4">
@@ -924,6 +962,7 @@ export default function Home() {
                       </div>
                     )}
                   </div>
+                  
                 </div>
               </div>
             </div>
