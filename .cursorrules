@@ -1,0 +1,15 @@
+
+do not overcomplicate things
+do not remove content unless specified
+if code is being repeated, refactor into components and keep it in the same file unless otherwise specified
+
+min-height: 100vh with flexbox causing the extra blank page issue. use padding-top instead when centering things on the page vertically
+
+a03 fetch and html upload should go through the exact same cleaning, fetch/uploaded > you have a file > clean and treat that file the same > etc etc
+
+pdf book pages rules:
+- page 1 : h1 title and .author author, wrapped in a div, and centered on the page, horizontally and vertically
+- page 2 : blank
+- page 3: IF there is a second title and author, in the font size of the book, no bolding wrapped in a div, and centered on the page, horizontally and vertically, IF NOT, repeat h1 title and .author in the book text size
+- page 4: blank
+- page 5: summary if keeping + one blank page, otherwise STORY STARTS
