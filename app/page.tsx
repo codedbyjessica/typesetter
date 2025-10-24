@@ -136,10 +136,19 @@ export default function Home() {
     
     // Formatting
     fontSize: 9,
+    lineSpacing: 1.6,
     pageBreaks: true,
     indentParagraphs: true,
     removeParagraphSpacing: true,
     dinkusSymbol: '* * *',
+    
+    // Page numbers
+    showPageNumbers: true,
+    hidePageNumbersUntilChapter1: true,
+    
+    // Headers
+    showHeaders: true,
+    hideHeadersUntilChapter1: true,
     
     // Title customization (for styling only)
     customTitle: '',
@@ -154,6 +163,11 @@ export default function Home() {
     marginBottom: 0.5,
     marginLeft: 0.5,
     marginUnit: 'in' as 'in' | 'cm',
+    
+    // Alternating margins for book binding
+    useAlternatingMargins: false,
+    innerMargin: 0.75,
+    outerMargin: 0.5,
   });
 
   // Helper to update a single setting
@@ -481,7 +495,7 @@ export default function Home() {
             {/* Page Size and Margins */}
             <div className="mb-8 p-6 bg-slate-50 rounded-xl">
               <SectionHeader level={3}>Page Size & Margins</SectionHeader>
-              <div className="grid md:grid-cols-2 gap-6">
+              <div className="grid md:grid-cols-3 gap-6">
                 <div>
                   <h4 className="text-sm font-medium text-slate-700 mb-3">Page Size</h4>
                   <div className="flex gap-2 mb-3">
@@ -516,12 +530,31 @@ export default function Home() {
                 
                 <div>
                   <h4 className="text-sm font-medium text-slate-700 mb-3">Margins</h4>
-                  <div className="grid grid-cols-2 gap-2 mb-3">
-                    <NumberInput label="Top" value={settings.marginTop} onChange={(value) => updateSetting('marginTop', value)} />
-                    <NumberInput label="Bottom" value={settings.marginBottom} onChange={(value) => updateSetting('marginBottom', value)} />
-                    <NumberInput label="Left" value={settings.marginLeft} onChange={(value) => updateSetting('marginLeft', value)} />
-                    <NumberInput label="Right" value={settings.marginRight} onChange={(value) => updateSetting('marginRight', value)} />
+                  
+                  <div className="mb-3">
+                    <Checkbox
+                      checked={settings.useAlternatingMargins}
+                      onChange={(checked) => updateSetting('useAlternatingMargins', checked)}
+                      label="Alternating margins (for book binding)"
+                    />
                   </div>
+                  
+                  {!settings.useAlternatingMargins ? (
+                    <div className="grid grid-cols-2 gap-2 mb-3">
+                      <NumberInput label="Top" value={settings.marginTop} onChange={(value) => updateSetting('marginTop', value)} />
+                      <NumberInput label="Bottom" value={settings.marginBottom} onChange={(value) => updateSetting('marginBottom', value)} />
+                      <NumberInput label="Left" value={settings.marginLeft} onChange={(value) => updateSetting('marginLeft', value)} />
+                      <NumberInput label="Right" value={settings.marginRight} onChange={(value) => updateSetting('marginRight', value)} />
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-2 gap-2 mb-3">
+                      <NumberInput label="Top" value={settings.marginTop} onChange={(value) => updateSetting('marginTop', value)} />
+                      <NumberInput label="Bottom" value={settings.marginBottom} onChange={(value) => updateSetting('marginBottom', value)} />
+                      <NumberInput label="Inner (binding)" value={settings.innerMargin} onChange={(value) => updateSetting('innerMargin', value)} />
+                      <NumberInput label="Outer (edge)" value={settings.outerMargin} onChange={(value) => updateSetting('outerMargin', value)} />
+                    </div>
+                  )}
+                  
                   <div className="flex items-center gap-2">
                     <select
                       value={settings.marginUnit}
@@ -533,6 +566,200 @@ export default function Home() {
                     </select>
                     <p className="text-xs text-slate-500">Default: 1 in all sides</p>
                   </div>
+                </div>
+
+                <div>
+                  <h4 className="text-sm font-medium text-slate-700 mb-3">Preview</h4>
+                  <div className="flex items-center justify-center gap-2" style={{ height: '180px' }}>
+                    {(() => {
+                      // Convert all to same unit for calculation (inches)
+                      const pageWidthIn = settings.pageUnit === 'cm' ? settings.pageWidth / 2.54 : settings.pageWidth;
+                      const pageHeightIn = settings.pageUnit === 'cm' ? settings.pageHeight / 2.54 : settings.pageHeight;
+                      const marginTopIn = settings.marginUnit === 'cm' ? settings.marginTop / 2.54 : settings.marginTop;
+                      const marginBottomIn = settings.marginUnit === 'cm' ? settings.marginBottom / 2.54 : settings.marginBottom;
+                      
+                      // Scale factor to fit in preview (max 150px height)
+                      const scale = Math.min(150 / (pageHeightIn * 20), 1);
+                      const previewWidth = pageWidthIn * 20 * scale;
+                      const previewHeight = pageHeightIn * 20 * scale;
+                      const previewMarginTop = marginTopIn * 20 * scale;
+                      const previewMarginBottom = marginBottomIn * 20 * scale;
+                      
+                      if (!settings.useAlternatingMargins) {
+                        // Single page preview
+                        const marginLeftIn = settings.marginUnit === 'cm' ? settings.marginLeft / 2.54 : settings.marginLeft;
+                        const marginRightIn = settings.marginUnit === 'cm' ? settings.marginRight / 2.54 : settings.marginRight;
+                        const previewMarginLeft = marginLeftIn * 20 * scale;
+                        const previewMarginRight = marginRightIn * 20 * scale;
+                        
+                        return (
+                          <div 
+                            style={{
+                              width: `${previewWidth}px`,
+                              height: `${previewHeight}px`,
+                              position: 'relative',
+                              border: '2px solid #94a3b8',
+                              backgroundColor: 'white',
+                              boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
+                            }}
+                          >
+                            {/* Margin overlays */}
+                            <div style={{
+                              position: 'absolute',
+                              top: 0,
+                              left: 0,
+                              right: 0,
+                              height: `${previewMarginTop}px`,
+                              backgroundColor: 'rgba(239, 68, 68, 0.2)',
+                              borderBottom: '1px dashed #ef4444'
+                            }} />
+                            <div style={{
+                              position: 'absolute',
+                              bottom: 0,
+                              left: 0,
+                              right: 0,
+                              height: `${previewMarginBottom}px`,
+                              backgroundColor: 'rgba(239, 68, 68, 0.2)',
+                              borderTop: '1px dashed #ef4444'
+                            }} />
+                            <div style={{
+                              position: 'absolute',
+                              top: 0,
+                              left: 0,
+                              bottom: 0,
+                              width: `${previewMarginLeft}px`,
+                              backgroundColor: 'rgba(239, 68, 68, 0.2)',
+                              borderRight: '1px dashed #ef4444'
+                            }} />
+                            <div style={{
+                              position: 'absolute',
+                              top: 0,
+                              right: 0,
+                              bottom: 0,
+                              width: `${previewMarginRight}px`,
+                              backgroundColor: 'rgba(239, 68, 68, 0.2)',
+                              borderLeft: '1px dashed #ef4444'
+                            }} />
+                            <div style={{
+                              position: 'absolute',
+                              top: `${previewMarginTop}px`,
+                              left: `${previewMarginLeft}px`,
+                              right: `${previewMarginRight}px`,
+                              bottom: `${previewMarginBottom}px`,
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              fontSize: '8px',
+                              color: '#64748b',
+                              textAlign: 'center'
+                            }}>
+                              <div>Content<br/>Area</div>
+                            </div>
+                          </div>
+                        );
+                      } else {
+                        // Two-page spread preview
+                        const innerMarginIn = settings.marginUnit === 'cm' ? settings.innerMargin / 2.54 : settings.innerMargin;
+                        const outerMarginIn = settings.marginUnit === 'cm' ? settings.outerMargin / 2.54 : settings.outerMargin;
+                        const previewInnerMargin = innerMarginIn * 20 * scale;
+                        const previewOuterMargin = outerMarginIn * 20 * scale;
+                        
+                        const PagePreview = ({ isEven }: { isEven: boolean }) => (
+                          <div style={{ textAlign: 'center' }}>
+                            <div 
+                              style={{
+                                width: `${previewWidth}px`,
+                                height: `${previewHeight}px`,
+                                position: 'relative',
+                                border: '2px solid #94a3b8',
+                                backgroundColor: 'white',
+                                boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
+                                marginBottom: '4px'
+                              }}
+                            >
+                              {/* Top margin */}
+                              <div style={{
+                                position: 'absolute',
+                                top: 0,
+                                left: 0,
+                                right: 0,
+                                height: `${previewMarginTop}px`,
+                                backgroundColor: 'rgba(239, 68, 68, 0.2)',
+                                borderBottom: '1px dashed #ef4444'
+                              }} />
+                              {/* Bottom margin */}
+                              <div style={{
+                                position: 'absolute',
+                                bottom: 0,
+                                left: 0,
+                                right: 0,
+                                height: `${previewMarginBottom}px`,
+                                backgroundColor: 'rgba(239, 68, 68, 0.2)',
+                                borderTop: '1px dashed #ef4444'
+                              }} />
+                              {/* Left margin (outer for even, inner for odd) */}
+                              <div style={{
+                                position: 'absolute',
+                                top: 0,
+                                left: 0,
+                                bottom: 0,
+                                width: `${isEven ? previewOuterMargin : previewInnerMargin}px`,
+                                backgroundColor: isEven ? 'rgba(59, 130, 246, 0.2)' : 'rgba(34, 197, 94, 0.2)',
+                                borderRight: `1px dashed ${isEven ? '#3b82f6' : '#22c55e'}`
+                              }} />
+                              {/* Right margin (inner for even, outer for odd) */}
+                              <div style={{
+                                position: 'absolute',
+                                top: 0,
+                                right: 0,
+                                bottom: 0,
+                                width: `${isEven ? previewInnerMargin : previewOuterMargin}px`,
+                                backgroundColor: isEven ? 'rgba(34, 197, 94, 0.2)' : 'rgba(59, 130, 246, 0.2)',
+                                borderLeft: `1px dashed ${isEven ? '#22c55e' : '#3b82f6'}`
+                              }} />
+                              <div style={{
+                                position: 'absolute',
+                                top: `${previewMarginTop}px`,
+                                left: `${isEven ? previewOuterMargin : previewInnerMargin}px`,
+                                right: `${isEven ? previewInnerMargin : previewOuterMargin}px`,
+                                bottom: `${previewMarginBottom}px`,
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                fontSize: '8px',
+                                color: '#64748b',
+                                textAlign: 'center'
+                              }}>
+                                <div>Content</div>
+                              </div>
+                            </div>
+                            <p className="text-xs text-slate-600">{isEven ? 'Even' : 'Odd'}</p>
+                          </div>
+                        );
+                        
+                        return (
+                          <>
+                            <PagePreview isEven={true} />
+                            <PagePreview isEven={false} />
+                          </>
+                        );
+                      }
+                    })()}
+                  </div>
+                  <p className="text-xs text-slate-500 text-center mt-2">
+                    {settings.useAlternatingMargins ? (
+                      <>
+                        <span className="inline-block w-3 h-3 bg-blue-200 border border-blue-400 mr-1"></span>
+                        Outer · 
+                        <span className="inline-block w-3 h-3 bg-green-200 border border-green-500 mx-1"></span>
+                        Inner · 
+                        <span className="inline-block w-3 h-3 bg-red-200 border border-red-400 mx-1"></span>
+                        Top/Bottom
+                      </>
+                    ) : (
+                      'Red areas show margins'
+                    )}
+                  </p>
                 </div>
               </div>
             </div>
@@ -628,6 +855,24 @@ export default function Home() {
                     min={6}
                     max={16}
                   />
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-2">
+                      Line Spacing: {settings.lineSpacing.toFixed(1)}
+                    </label>
+                    <input
+                      type="range"
+                      min="1.0"
+                      max="2.5"
+                      step="0.1"
+                      value={settings.lineSpacing}
+                      onChange={(e) => updateSetting('lineSpacing', parseFloat(e.target.value))}
+                      className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer"
+                    />
+                    <div className="flex justify-between text-xs text-slate-500 mt-1">
+                      <span>1.0 (tight)</span>
+                      <span>2.5 (loose)</span>
+                    </div>
+                  </div>
                   {formattingCheckboxes.map(option => (
                     <Checkbox
                       key={option.key}
@@ -642,6 +887,43 @@ export default function Home() {
                     onChange={(value) => updateSetting('dinkusSymbol', value)}
                     placeholder="***"
                   />
+                  
+                  {/* Page Numbers */}
+                  <div className="border-t border-slate-200 pt-4 mt-4">
+                    <Checkbox
+                      checked={settings.showPageNumbers}
+                      onChange={(checked) => updateSetting('showPageNumbers', checked)}
+                      label="Show Page Numbers"
+                    />
+                    {settings.showPageNumbers && (
+                      <div className="ml-6 mt-3 space-y-2">
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <input
+                            type="radio"
+                            name="pageNumberOption"
+                            checked={!settings.hidePageNumbersUntilChapter1}
+                            onChange={() => {
+                              updateSetting('hidePageNumbersUntilChapter1', false);
+                            }}
+                            className="w-4 h-4 text-slate-700 focus:ring-2 focus:ring-slate-500"
+                          />
+                          <span className="text-sm text-slate-700">Start from page 1</span>
+                        </label>
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <input
+                            type="radio"
+                            name="pageNumberOption"
+                            checked={settings.hidePageNumbersUntilChapter1}
+                            onChange={() => {
+                              updateSetting('hidePageNumbersUntilChapter1', true);
+                            }}
+                            className="w-4 h-4 text-slate-700 focus:ring-2 focus:ring-slate-500"
+                          />
+                          <span className="text-sm text-slate-700">Hide until Chapter 1 (shows actual page #)</span>
+                        </label>
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
             </div>

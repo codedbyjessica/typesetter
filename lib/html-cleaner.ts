@@ -65,10 +65,15 @@ export interface CleanHtmlOptions {
   removeChapterNotes: boolean;
   removeSummary: boolean;
   fontSize: number;
+  lineSpacing: number;
   pageBreaks: boolean;
   indentParagraphs: boolean;
   removeParagraphSpacing: boolean;
   dinkusSymbol: string;
+  showPageNumbers: boolean;
+  hidePageNumbersUntilChapter1: boolean;
+  showHeaders: boolean;
+  hideHeadersUntilChapter1: boolean;
   customTitle: string;
   customAuthor: string;
   pageWidth: number;
@@ -79,6 +84,9 @@ export interface CleanHtmlOptions {
   marginBottom: number;
   marginLeft: number;
   marginUnit: 'in' | 'cm';
+  useAlternatingMargins: boolean;
+  innerMargin: number;
+  outerMargin: number;
 }
 
 /**
@@ -174,6 +182,11 @@ export function cleanHtml(html: string, options: CleanHtmlOptions): string {
 
   // Format chapter headings
   formatChapterHeadings($);
+  
+  // Mark Chapter 1 for page numbering if needed
+  if (options.showPageNumbers && options.hidePageNumbersUntilChapter1) {
+    markChapterOne($);
+  }
 
   // Add page breaks after chapters
   if (options.pageBreaks) {
@@ -189,8 +202,12 @@ export function cleanHtml(html: string, options: CleanHtmlOptions): string {
   // Get the cleaned HTML
   const bodyContent = $('body').html() || $.html();
 
+  // Extract title and author for headers
+  let title = options.customTitle || $('body > h1').first().text().trim() || '';
+  let author = options.customAuthor || $('.author').first().text().trim().replace(/^by\s+/i, '') || '';
+
   // Create final HTML with styles
-  return generateStyledHtml(bodyContent, options);
+  return generateStyledHtml(bodyContent, options, title, author);
 }
 
 /**
@@ -526,6 +543,39 @@ function addChapterPageBreaks($: cheerio.CheerioAPI): void {
 }
 
 /**
+ * Finds and marks the element containing "Chapter 1" for page numbering
+ */
+function markChapterOne($: cheerio.CheerioAPI): void {
+  // Search for "Chapter 1" (case insensitive) in various elements
+  const selectors = [
+    '.chapter', '.chapter-heading-wrapper', 
+    'h1', 'h2', 'h3', 
+    '[class*="chapter"]',
+    'div', 'section'
+  ];
+  
+  let found = false;
+  
+  for (const selector of selectors) {
+    if (found) break;
+    
+    $(selector).each(function() {
+      if (found) return;
+      
+      const $el = $(this);
+      const text = $el.text().trim();
+      
+      // Check if text contains "chapter 1" (case insensitive)
+      if (/chapter\s*1(?:\s|:|$)/i.test(text)) {
+        $el.addClass('chapter-one-start');
+        found = true;
+        return false; // Break the loop
+      }
+    });
+  }
+}
+
+/**
  * Removes all empty elements throughout the document
  */
 function removeAllEmptyElements($: cheerio.CheerioAPI): void {
@@ -611,25 +661,142 @@ function trimTrailingEmptyElements($: cheerio.CheerioAPI): void {
 /**
  * Generates the final HTML with styling for PDF generation
  */
-function generateStyledHtml(bodyContent: string, options: CleanHtmlOptions): string {
+function generateStyledHtml(bodyContent: string, options: CleanHtmlOptions, title: string = '', author: string = ''): string {
   return `
     <!DOCTYPE html>
     <html>
     <head>
       <meta charset="UTF-8">
       <style>
+        ${!options.useAlternatingMargins ? `
         @page {
           size: ${options.pageWidth}${options.pageUnit} ${options.pageHeight}${options.pageUnit};
           margin-top: ${options.marginTop}${options.marginUnit};
           margin-right: ${options.marginRight}${options.marginUnit};
           margin-bottom: ${options.marginBottom}${options.marginUnit};
           margin-left: ${options.marginLeft}${options.marginUnit};
+          ${options.showPageNumbers ? `
+          @bottom-center {
+            content: counter(page);
+            font-size: ${options.fontSize * 0.9}pt;
+            font-family: 'Garamond', 'Times New Roman', serif;
+            margin-top: -0.2in;
+          }
+          ` : ''}
         }
         
+        ${options.showHeaders ? `
+        /* Left pages (even) - show author */
+        @page :left {
+          @top-center {
+            content: "${author.replace(/"/g, '\\"')}";
+            font-size: ${options.fontSize * 0.8}pt;
+            font-family: 'Garamond', 'Times New Roman', serif;
+            font-style: italic;
+            margin-bottom: -0.2in;
+          }
+        }
+        
+        /* Right pages (odd) - show title */
+        @page :right {
+          @top-center {
+            content: "${title.replace(/"/g, '\\"')}";
+            font-size: ${options.fontSize * 0.8}pt;
+            font-family: 'Garamond', 'Times New Roman', serif;
+            font-style: italic;
+            margin-bottom: -0.15in;
+          }
+        }
+        ` : ''}
+        ` : `
+        @page {
+          size: ${options.pageWidth}${options.pageUnit} ${options.pageHeight}${options.pageUnit};
+          margin-top: ${options.marginTop}${options.marginUnit};
+          margin-bottom: ${options.marginBottom}${options.marginUnit};
+          ${options.showPageNumbers ? `
+          @bottom-center {
+            content: counter(page);
+            font-size: ${options.fontSize * 0.9}pt;
+            font-family: 'Garamond', 'Times New Roman', serif;
+            margin-top: -0.25in;
+          }
+          ` : ''}
+        }
+        
+        /* Left pages (even) - outer margin on left, inner on right */
+        @page :left {
+          margin-left: ${options.outerMargin}${options.marginUnit};
+          margin-right: ${options.innerMargin}${options.marginUnit};
+          ${options.showHeaders ? `
+          @top-center {
+            content: "${author.replace(/"/g, '\\"')}";
+            font-size: ${options.fontSize * 0.8}pt;
+            font-family: 'Garamond', 'Times New Roman', serif;
+            font-style: italic;
+            margin-bottom: -0.15in;
+          }
+          ` : ''}
+        }
+        
+        /* Right pages (odd) - inner margin on left, outer on right */
+        @page :right {
+          margin-left: ${options.innerMargin}${options.marginUnit};
+          margin-right: ${options.outerMargin}${options.marginUnit};
+          ${options.showHeaders ? `
+          @top-center {
+            content: "${title.replace(/"/g, '\\"')}";
+            font-size: ${options.fontSize * 0.8}pt;
+            font-family: 'Garamond', 'Times New Roman', serif;
+            font-style: italic;
+            margin-bottom: -0.15in;
+          }
+          ` : ''}
+        }
+        `}
+        
+        ${(options.showPageNumbers && options.hidePageNumbersUntilChapter1) || (options.showHeaders && options.hideHeadersUntilChapter1) ? `
+        /* Hide page numbers and/or headers until Chapter 1 */
+        .title-page,
+        .blank-page-after-title,
+        .preface:not(.chapter),
+        .blank-page-after-preface {
+          page: frontmatter-page;
+        }
+        
+        @page frontmatter-page {
+          ${options.showPageNumbers && options.hidePageNumbersUntilChapter1 ? `
+          @bottom-center {
+            content: '';
+          }
+          ` : ''}
+          ${options.showHeaders && options.hideHeadersUntilChapter1 ? `
+          @top-center {
+            content: '';
+          }
+          ` : ''}
+        }
+        
+        @page frontmatter-page:left {
+          ${options.showHeaders && options.hideHeadersUntilChapter1 ? `
+          @top-center {
+            content: '';
+          }
+          ` : ''}
+        }
+        
+        @page frontmatter-page:right {
+          ${options.showHeaders && options.hideHeadersUntilChapter1 ? `
+          @top-center {
+            content: '';
+          }
+          ` : ''}
+        }
+        ` : ''}
+        
         body {
-          font-family: 'Georgia', 'Times New Roman', serif !important;
+          font-family: 'Garamond', 'Times New Roman', serif !important;
           font-size: ${options.fontSize}pt;
-          line-height: 1.6;
+          line-height: ${options.lineSpacing};
           color: #000;
           max-width: 100%;
         }
