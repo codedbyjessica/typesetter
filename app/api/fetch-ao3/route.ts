@@ -29,9 +29,9 @@ export async function POST(request: NextRequest) {
     });
 
     // Process through shared function (same as uploads)
-    const { html, title, author } = processAO3Html(response.data);
+    const { html, title, author, wordCount, fandom, warning, publishDate, completedDate, ao3Url } = processAO3Html(response.data, url);
 
-    return NextResponse.json({ html, title, author });
+    return NextResponse.json({ html, title, author, wordCount, fandom, warning, publishDate, completedDate, ao3Url });
   } catch (error) {
     console.error('Error fetching from AO3:', error);
     return NextResponse.json(

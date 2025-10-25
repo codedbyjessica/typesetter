@@ -1,119 +1,33 @@
 'use client';
 
 import { useState } from 'react';
-
-// Reusable Components
-interface CheckboxProps {
-  checked: boolean;
-  onChange: (checked: boolean) => void;
-  label: string;
-}
-
-const Checkbox = ({ checked, onChange, label }: CheckboxProps) => (
-  <label className="flex items-center gap-3 cursor-pointer">
-    <input
-      type="checkbox"
-      checked={checked}
-      onChange={(e) => onChange(e.target.checked)}
-      className="w-5 h-5 rounded border-slate-300 text-slate-700 focus:ring-2 focus:ring-slate-500"
-    />
-    <span className="text-slate-700">{label}</span>
-  </label>
-);
-
-interface NumberInputProps {
-  label: string;
-  value: number;
-  onChange: (value: number) => void;
-  step?: number;
-  min?: number;
-  max?: number;
-}
-
-const NumberInput = ({ label, value, onChange, step = 0.1, min, max }: NumberInputProps) => (
-  <div>
-    <label className="block text-xs text-slate-600 mb-1">{label}</label>
-    <input
-      type="number"
-      step={step}
-      min={min}
-      max={max}
-      value={value}
-      onChange={(e) => onChange(Number(e.target.value))}
-      className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-500"
-    />
-  </div>
-);
-
-interface TextInputProps {
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-  placeholder?: string;
-  helperText?: string;
-}
-
-const TextInput = ({ label, value, onChange, placeholder, helperText }: TextInputProps) => (
-  <div>
-    <label className="block text-slate-700 mb-2">{label}</label>
-    <input
-      type="text"
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      placeholder={placeholder}
-      className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-500"
-    />
-    {helperText && <p className="text-xs text-slate-500 mt-1">{helperText}</p>}
-  </div>
-);
-
-interface RangeSliderProps {
-  label: string;
-  value: number;
-  onChange: (value: number) => void;
-  min: number;
-  max: number;
-  unit?: string;
-}
-
-const RangeSlider = ({ label, value, onChange, min, max, unit = 'pt' }: RangeSliderProps) => (
-  <div>
-    <label className="block text-slate-700 mb-2">
-      {label}: {value}{unit}
-    </label>
-    <input
-      type="range"
-      min={min}
-      max={max}
-      value={value}
-      onChange={(e) => onChange(Number(e.target.value))}
-      className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-slate-700"
-    />
-    <div className="flex justify-between text-xs text-slate-500 mt-1">
-      <span>{min}{unit}</span>
-      <span>{max}{unit}</span>
-    </div>
-  </div>
-);
-
-interface SectionHeaderProps {
-  children: React.ReactNode;
-  level?: 2 | 3;
-}
-
-const SectionHeader = ({ children, level = 2 }: SectionHeaderProps) => {
-  const className = level === 2 
-    ? "text-2xl font-semibold text-slate-800 mb-6"
-    : "text-lg font-medium text-slate-700 mb-4";
-  
-  return level === 2 ? (
-    <h2 className={className}>{children}</h2>
-  ) : (
-    <h3 className={className}>{children}</h3>
-  );
-};
+import { Checkbox, NumberInput, TextInput, RangeSlider, SectionHeader } from './components/FormControls';
+import { PageMarginPreview } from './components/PageMarginPreview';
+import { PreviewModal } from './components/PreviewModal';
 
 export default function Home() {
+  // Color palette for sections - easily customizable
+  const colors = {
+    primary: {
+      bg: 'bg-slate-50',
+      border: 'border-slate-200',
+      text: 'text-slate-700',
+      hover: 'hover:bg-slate-100'
+    },
+    secondary: {
+      bg: 'bg-blue-50',
+      border: 'border-blue-200',
+      text: 'text-blue-600',
+      hover: 'hover:bg-blue-100'
+    },
+    tertiary: {
+      bg: 'bg-slate-100',
+      border: 'border-slate-300',
+      text: 'text-slate-800',
+      hover: 'hover:bg-slate-200'
+    }
+  };
+
   const [htmlContent, setHtmlContent] = useState<string>('');
   const [ao3Url, setAo3Url] = useState<string>('');
   const [loading, setLoading] = useState(false);
@@ -124,6 +38,7 @@ export default function Home() {
   const [previewHtml, setPreviewHtml] = useState<string>('');
   const [uploadedFileName, setUploadedFileName] = useState<string>('');
   const [metadataLoaded, setMetadataLoaded] = useState(false);
+  const [metadata, setMetadata] = useState<{ wordCount?: string; fandom?: string; warning?: string; publishDate?: string; completedDate?: string; ao3Url?: string }>({});
   
   // Structured settings state
   const [settings, setSettings] = useState({
@@ -153,6 +68,9 @@ export default function Home() {
     // Title customization (for styling only)
     customTitle: '',
     customAuthor: '',
+    
+    // Copyright page
+    binderName: '',
     
     // Page settings
     pageWidth: 5.5,
@@ -241,7 +159,7 @@ export default function Home() {
       try {
         // Process through the same function as AO3 fetch
         const { processAO3Html } = await import('@/lib/html-cleaner');
-        const { html, title, author } = processAO3Html(content);
+        const { html, title, author, wordCount, fandom, warning, publishDate, completedDate, ao3Url } = processAO3Html(content);
         
         setHtmlContent(html);
         setError('');
@@ -251,6 +169,7 @@ export default function Home() {
         // Auto-populate title and author
         updateSetting('customTitle', title);
         updateSetting('customAuthor', author);
+        setMetadata({ wordCount, fandom, warning, publishDate, completedDate, ao3Url });
         setMetadataLoaded(true);
         
         // Clear AO3 URL since we're now using uploaded file
@@ -307,6 +226,7 @@ export default function Home() {
       // Use title/author from API (already extracted by shared processAO3Html function)
       updateSetting('customTitle', data.title || '');
       updateSetting('customAuthor', data.author || '');
+      setMetadata({ wordCount: data.wordCount, fandom: data.fandom, warning: data.warning, publishDate: data.publishDate, completedDate: data.completedDate, ao3Url: data.ao3Url });
       setMetadataLoaded(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to fetch from AO3');
@@ -324,7 +244,7 @@ export default function Home() {
     setLoading(true);
     setError('');
 
-    const options = settings;
+    const options = { ...settings, ...metadata };
 
     try {
       if (downloadFormat === 'pdf') {
@@ -392,7 +312,7 @@ export default function Home() {
     setLoading(true);
     setError('');
 
-    const options = settings;
+    const options = { ...settings, ...metadata };
 
     try {
       const htmlResponse = await fetch('/api/preview-html', {
@@ -423,10 +343,10 @@ export default function Home() {
       <main className="container mx-auto px-4 py-12 max-w-5xl">
         <div className="bg-white rounded-2xl shadow-xl p-8">
           <h1 className="text-4xl font-bold text-slate-800 mb-2">
-            Typesetter
+            AO3 Typesetter
           </h1>
           <p className="text-slate-600 mb-8">
-            Create beautiful PDFs from HTML files or AO3 stories
+            Create clean typesets of AO3 stories
           </p>
 
           {error && (
@@ -489,11 +409,11 @@ export default function Home() {
           </div>
 
           {/* Settings Section */}
-          <div className="border-t border-slate-200 pt-8 mb-8">
+          <div className="border-t-2 border-slate-300 pt-8 mb-8 mt-8">
             <SectionHeader level={2}>Settings</SectionHeader>
 
             {/* Page Size and Margins */}
-            <div className="mb-8 p-6 bg-slate-50 rounded-xl">
+            <div className={`mb-8 p-6 ${colors.primary.bg} rounded-xl border ${colors.primary.border}`}>
               <SectionHeader level={3}>Page Size & Margins</SectionHeader>
               <div className="grid md:grid-cols-3 gap-6">
                 <div>
@@ -535,7 +455,7 @@ export default function Home() {
                     <Checkbox
                       checked={settings.useAlternatingMargins}
                       onChange={(checked) => updateSetting('useAlternatingMargins', checked)}
-                      label="Alternating margins (for book binding)"
+                      label="Different margins for even and odd pages"
                     />
                   </div>
                   
@@ -571,180 +491,19 @@ export default function Home() {
                 <div>
                   <h4 className="text-sm font-medium text-slate-700 mb-3">Preview</h4>
                   <div className="flex items-center justify-center gap-2" style={{ height: '180px' }}>
-                    {(() => {
-                      // Convert all to same unit for calculation (inches)
-                      const pageWidthIn = settings.pageUnit === 'cm' ? settings.pageWidth / 2.54 : settings.pageWidth;
-                      const pageHeightIn = settings.pageUnit === 'cm' ? settings.pageHeight / 2.54 : settings.pageHeight;
-                      const marginTopIn = settings.marginUnit === 'cm' ? settings.marginTop / 2.54 : settings.marginTop;
-                      const marginBottomIn = settings.marginUnit === 'cm' ? settings.marginBottom / 2.54 : settings.marginBottom;
-                      
-                      // Scale factor to fit in preview (max 150px height)
-                      const scale = Math.min(150 / (pageHeightIn * 20), 1);
-                      const previewWidth = pageWidthIn * 20 * scale;
-                      const previewHeight = pageHeightIn * 20 * scale;
-                      const previewMarginTop = marginTopIn * 20 * scale;
-                      const previewMarginBottom = marginBottomIn * 20 * scale;
-                      
-                      if (!settings.useAlternatingMargins) {
-                        // Single page preview
-                        const marginLeftIn = settings.marginUnit === 'cm' ? settings.marginLeft / 2.54 : settings.marginLeft;
-                        const marginRightIn = settings.marginUnit === 'cm' ? settings.marginRight / 2.54 : settings.marginRight;
-                        const previewMarginLeft = marginLeftIn * 20 * scale;
-                        const previewMarginRight = marginRightIn * 20 * scale;
-                        
-                        return (
-                          <div 
-                            style={{
-                              width: `${previewWidth}px`,
-                              height: `${previewHeight}px`,
-                              position: 'relative',
-                              border: '2px solid #94a3b8',
-                              backgroundColor: 'white',
-                              boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
-                            }}
-                          >
-                            {/* Margin overlays */}
-                            <div style={{
-                              position: 'absolute',
-                              top: 0,
-                              left: 0,
-                              right: 0,
-                              height: `${previewMarginTop}px`,
-                              backgroundColor: 'rgba(239, 68, 68, 0.2)',
-                              borderBottom: '1px dashed #ef4444'
-                            }} />
-                            <div style={{
-                              position: 'absolute',
-                              bottom: 0,
-                              left: 0,
-                              right: 0,
-                              height: `${previewMarginBottom}px`,
-                              backgroundColor: 'rgba(239, 68, 68, 0.2)',
-                              borderTop: '1px dashed #ef4444'
-                            }} />
-                            <div style={{
-                              position: 'absolute',
-                              top: 0,
-                              left: 0,
-                              bottom: 0,
-                              width: `${previewMarginLeft}px`,
-                              backgroundColor: 'rgba(239, 68, 68, 0.2)',
-                              borderRight: '1px dashed #ef4444'
-                            }} />
-                            <div style={{
-                              position: 'absolute',
-                              top: 0,
-                              right: 0,
-                              bottom: 0,
-                              width: `${previewMarginRight}px`,
-                              backgroundColor: 'rgba(239, 68, 68, 0.2)',
-                              borderLeft: '1px dashed #ef4444'
-                            }} />
-                            <div style={{
-                              position: 'absolute',
-                              top: `${previewMarginTop}px`,
-                              left: `${previewMarginLeft}px`,
-                              right: `${previewMarginRight}px`,
-                              bottom: `${previewMarginBottom}px`,
-                              display: 'flex',
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                              fontSize: '8px',
-                              color: '#64748b',
-                              textAlign: 'center'
-                            }}>
-                              <div>Content<br/>Area</div>
-                            </div>
-                          </div>
-                        );
-                      } else {
-                        // Two-page spread preview
-                        const innerMarginIn = settings.marginUnit === 'cm' ? settings.innerMargin / 2.54 : settings.innerMargin;
-                        const outerMarginIn = settings.marginUnit === 'cm' ? settings.outerMargin / 2.54 : settings.outerMargin;
-                        const previewInnerMargin = innerMarginIn * 20 * scale;
-                        const previewOuterMargin = outerMarginIn * 20 * scale;
-                        
-                        const PagePreview = ({ isEven }: { isEven: boolean }) => (
-                          <div style={{ textAlign: 'center' }}>
-                            <div 
-                              style={{
-                                width: `${previewWidth}px`,
-                                height: `${previewHeight}px`,
-                                position: 'relative',
-                                border: '2px solid #94a3b8',
-                                backgroundColor: 'white',
-                                boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
-                                marginBottom: '4px'
-                              }}
-                            >
-                              {/* Top margin */}
-                              <div style={{
-                                position: 'absolute',
-                                top: 0,
-                                left: 0,
-                                right: 0,
-                                height: `${previewMarginTop}px`,
-                                backgroundColor: 'rgba(239, 68, 68, 0.2)',
-                                borderBottom: '1px dashed #ef4444'
-                              }} />
-                              {/* Bottom margin */}
-                              <div style={{
-                                position: 'absolute',
-                                bottom: 0,
-                                left: 0,
-                                right: 0,
-                                height: `${previewMarginBottom}px`,
-                                backgroundColor: 'rgba(239, 68, 68, 0.2)',
-                                borderTop: '1px dashed #ef4444'
-                              }} />
-                              {/* Left margin (outer for even, inner for odd) */}
-                              <div style={{
-                                position: 'absolute',
-                                top: 0,
-                                left: 0,
-                                bottom: 0,
-                                width: `${isEven ? previewOuterMargin : previewInnerMargin}px`,
-                                backgroundColor: isEven ? 'rgba(59, 130, 246, 0.2)' : 'rgba(34, 197, 94, 0.2)',
-                                borderRight: `1px dashed ${isEven ? '#3b82f6' : '#22c55e'}`
-                              }} />
-                              {/* Right margin (inner for even, outer for odd) */}
-                              <div style={{
-                                position: 'absolute',
-                                top: 0,
-                                right: 0,
-                                bottom: 0,
-                                width: `${isEven ? previewInnerMargin : previewOuterMargin}px`,
-                                backgroundColor: isEven ? 'rgba(34, 197, 94, 0.2)' : 'rgba(59, 130, 246, 0.2)',
-                                borderLeft: `1px dashed ${isEven ? '#22c55e' : '#3b82f6'}`
-                              }} />
-                              <div style={{
-                                position: 'absolute',
-                                top: `${previewMarginTop}px`,
-                                left: `${isEven ? previewOuterMargin : previewInnerMargin}px`,
-                                right: `${isEven ? previewInnerMargin : previewOuterMargin}px`,
-                                bottom: `${previewMarginBottom}px`,
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                                fontSize: '8px',
-                                color: '#64748b',
-                                textAlign: 'center'
-                              }}>
-                                <div>Content</div>
-                              </div>
-                            </div>
-                            <p className="text-xs text-slate-600">{isEven ? 'Even' : 'Odd'}</p>
-                          </div>
-                        );
-                        
-                        return (
-                          <>
-                            <PagePreview isEven={true} />
-                            <PagePreview isEven={false} />
-                          </>
-                        );
-                      }
-                    })()}
+                    <PageMarginPreview
+                      pageWidth={settings.pageWidth}
+                      pageHeight={settings.pageHeight}
+                      pageUnit={settings.pageUnit}
+                      marginTop={settings.marginTop}
+                      marginBottom={settings.marginBottom}
+                      marginLeft={settings.marginLeft}
+                      marginRight={settings.marginRight}
+                      marginUnit={settings.marginUnit}
+                      useAlternatingMargins={settings.useAlternatingMargins}
+                      innerMargin={settings.innerMargin}
+                      outerMargin={settings.outerMargin}
+                    />
                   </div>
                   <p className="text-xs text-slate-500 text-center mt-2">
                     {settings.useAlternatingMargins ? (
@@ -765,10 +524,10 @@ export default function Home() {
             </div>
 
             {/* Title Override Section - Accordion */}
-            <div className="mb-8">
+            <div className="mb-10 pb-8 border-b border-slate-200">
               <button
                 onClick={() => setShowOverrideSection(!showOverrideSection)}
-                className="w-full flex items-center justify-between p-4 border-2 border-slate-300 rounded-xl hover:bg-slate-50 transition-colors"
+                className={`w-full flex items-center justify-between p-4 border-2 ${colors.secondary.border} rounded-xl ${colors.secondary.bg} ${colors.secondary.hover} transition-colors`}
               >
                 <div className="flex items-center gap-3">
                   <span className="text-lg">✏️</span>
@@ -787,20 +546,20 @@ export default function Home() {
               </button>
               
               {showOverrideSection && (
-                <div className="mt-4 p-6 bg-amber-50 border border-amber-200 rounded-xl">
+                <div className={`mt-4 p-6 ${colors.secondary.bg} border ${colors.secondary.border} rounded-xl`}>
                   <div className="flex items-start gap-3 mb-4">
                     <span className="text-2xl">⚠️</span>
                     <div>
-                      <h4 className="text-base font-medium text-amber-900 mb-1">
+                      <h4 className={`text-base font-medium ${colors.tertiary.text} mb-1`}>
                         Warning: For Styling Purposes Only
                       </h4>
-                      <p className="text-sm text-amber-800">
+                      <p className={`text-sm ${colors.primary.text}`}>
                         <strong>Never use this to remove credit or claim someone else&apos;s work as your own.</strong> These fields 
                         only adjust how the title and author appear in your PDF for personal styling preferences.
                       </p>
                     </div>
                   </div>
-                  <div className="grid md:grid-cols-2 gap-4">
+                  <div className="grid md:grid-cols-2 gap-4 mb-4">
                     <div>
                       <TextInput
                         label="Custom Title"
@@ -809,7 +568,7 @@ export default function Home() {
                         placeholder=""
                       />
                       {metadataLoaded && !settings.customTitle && (
-                        <p className="text-amber-600 text-xs mt-1">Title not found in HTML</p>
+                        <p className={`${colors.secondary.text} text-xs mt-1`}>Title not found in HTML</p>
                       )}
                     </div>
                     <div>
@@ -820,7 +579,7 @@ export default function Home() {
                         placeholder=""
                       />
                       {metadataLoaded && !settings.customAuthor && (
-                        <p className="text-amber-600 text-xs mt-1">Author not found in HTML</p>
+                        <p className={`${colors.secondary.text} text-xs mt-1`}>Author not found in HTML</p>
                       )}
                     </div>
                   </div>
@@ -828,9 +587,20 @@ export default function Home() {
               )}
             </div>
 
-            <div className="grid md:grid-cols-2 gap-8">
+
+            <div className={`mb-8 p-6 ${colors.secondary.bg} rounded-xl border ${colors.secondary.border}`}>
+              <TextInput
+                label="Binder Name (Optional)"
+                value={settings.binderName}
+                onChange={(value) => updateSetting('binderName', value)}
+                placeholder="Your name"
+                helperText="Add 'Binded by: [name]' to the copyright page"
+              />
+            </div>
+
+            <div className="grid md:grid-cols-2 gap-8 mb-8">
               {/* Cleaning Options */}
-              <div>
+              <div className={`p-6 ${colors.primary.bg} rounded-xl border ${colors.primary.border}`}>
                 <SectionHeader level={3}>Content Cleaning</SectionHeader>
                 <div className="space-y-3">
                   {cleaningOptions.map(option => (
@@ -845,7 +615,7 @@ export default function Home() {
               </div>
 
               {/* Formatting Options */}
-              <div>
+              <div className={`p-6 ${colors.primary.bg} rounded-xl border ${colors.primary.border}`}>
                 <SectionHeader level={3}>Formatting</SectionHeader>
                 <div className="space-y-4">
                   <RangeSlider
@@ -855,24 +625,15 @@ export default function Home() {
                     min={6}
                     max={16}
                   />
-                  <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-2">
-                      Line Spacing: {settings.lineSpacing.toFixed(1)}
-                    </label>
-                    <input
-                      type="range"
-                      min="1.0"
-                      max="2.5"
-                      step="0.1"
-                      value={settings.lineSpacing}
-                      onChange={(e) => updateSetting('lineSpacing', parseFloat(e.target.value))}
-                      className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer"
-                    />
-                    <div className="flex justify-between text-xs text-slate-500 mt-1">
-                      <span>1.0 (tight)</span>
-                      <span>2.5 (loose)</span>
-                    </div>
-                  </div>
+                  <RangeSlider
+                    label="Line Spacing"
+                    value={settings.lineSpacing}
+                    onChange={(value) => updateSetting('lineSpacing', value)}
+                    min={1.0}
+                    max={2.5}
+                    step={0.1}
+                    unit=""
+                  />
                   {formattingCheckboxes.map(option => (
                     <Checkbox
                       key={option.key}
@@ -894,7 +655,7 @@ export default function Home() {
                     <Checkbox
                       checked={settings.showHeaders}
                       onChange={(checked) => updateSetting('showHeaders', checked)}
-                      label="Show Headers (Title on odd pages, Author on even pages)"
+                      label="Show Headers (title on odd pages, author on even pages)"
                     />
                     {settings.showHeaders && (
                       <div className="ml-6 mt-3 space-y-2">
@@ -969,7 +730,7 @@ export default function Home() {
           </div>
 
           {/* Download Format Selection */}
-          <div className="border-t border-slate-200 pt-8 mb-6">
+          <div className="border-t-2 border-slate-300 pt-8 mb-8 mt-8">
             <SectionHeader>Download Format</SectionHeader>
             <div className="flex gap-4">
               <label className="flex items-center gap-3 cursor-pointer px-4 py-3 border-2 rounded-lg transition-colors hover:bg-slate-50 flex-1">
@@ -1004,7 +765,7 @@ export default function Home() {
           </div>
 
           {/* Action Buttons */}
-          <div className="border-t border-slate-200 pt-8">
+          <div className="border-t-2 border-slate-300 pt-8 mt-8">
             <div className="flex gap-4">
               <button
                 onClick={handlePreview}
@@ -1031,47 +792,11 @@ export default function Home() {
       </main>
 
       {/* Preview Modal */}
-      {showPreview && (
-        <div 
-          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4"
-          onClick={() => setShowPreview(false)}
-        >
-          <div 
-            className="bg-white rounded-2xl shadow-2xl w-full max-w-6xl h-[90vh] flex flex-col"
-            onClick={(e) => e.stopPropagation()}
-          >
-            {/* Modal Header */}
-            <div className="flex items-center justify-between p-6 border-b border-slate-200">
-              <h2 className="text-2xl font-bold text-slate-800">Preview - First 5 Pages</h2>
-              <button
-                onClick={() => setShowPreview(false)}
-                className="text-slate-400 hover:text-slate-600 transition-colors text-3xl leading-none"
-              >
-                ×
-              </button>
-            </div>
-            
-            {/* Modal Content */}
-            <div className="flex-1 overflow-hidden p-6">
-              <iframe
-                srcDoc={previewHtml}
-                className="w-full h-full border border-slate-200 rounded-lg bg-white"
-                title="Preview"
-              />
-            </div>
-            
-            {/* Modal Footer */}
-            <div className="p-6 border-t border-slate-200 flex justify-end">
-              <button
-                onClick={() => setShowPreview(false)}
-                className="px-6 py-2 bg-slate-800 text-white rounded-lg hover:bg-slate-900 transition-colors"
-              >
-                Close
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <PreviewModal 
+        isOpen={showPreview}
+        onClose={() => setShowPreview(false)}
+        htmlContent={previewHtml}
+      />
     </div>
   );
 }

@@ -4,7 +4,7 @@ import * as cheerio from 'cheerio';
  * Processes raw AO3 HTML into a clean, standardized structure
  * This is the first step that both fetched and uploaded HTML go through
  */
-export function processAO3Html(html: string): { html: string; title: string; author: string } {
+export function processAO3Html(html: string, url?: string): { html: string; title: string; author: string; wordCount: string; fandom: string; warning: string; publishDate: string; completedDate: string; ao3Url: string } {
   const $ = cheerio.load(html);
   
   // Check if this is raw AO3 HTML (has AO3-specific elements)
@@ -30,6 +30,44 @@ export function processAO3Html(html: string): { html: string; title: string; aut
     // Clean up author - remove "by " prefix if present
     author = author.replace(/^by\s+/i, '');
     
+    // Extract word count
+    let wordCount = '';
+    const statsText = $('dd.words').text().trim();
+    if (statsText) {
+      wordCount = statsText;
+    }
+    
+    // Extract fandom (first one if multiple)
+    let fandom = '';
+    const fandomElement = $('.fandom.tags a.tag').first();
+    if (fandomElement.length) {
+      fandom = fandomElement.text().trim();
+    }
+    
+    // Extract warning (archive warnings)
+    let warning = '';
+    const warningElements = $('.warning.tags a.tag, dd.warning').toArray();
+    if (warningElements.length) {
+      warning = warningElements.map(el => $(el).text().trim()).filter(w => w).join(', ');
+    }
+    
+    // Extract publish date
+    let publishDate = '';
+    const publishElement = $('dd.published').text().trim();
+    if (publishElement) {
+      publishDate = publishElement;
+    }
+    
+    // Extract completed date
+    let completedDate = '';
+    const completedElement = $('dd.status').text().trim();
+    if (completedElement) {
+      completedDate = completedElement;
+    }
+    
+    // Use provided URL or try to extract from meta
+    const ao3Url = url || $('link[rel="canonical"]').attr('href') || '';
+    
     // Create a clean HTML document
     const processedHtml = `
       <!DOCTYPE html>
@@ -46,7 +84,7 @@ export function processAO3Html(html: string): { html: string; title: string; aut
       </html>
     `;
     
-    return { html: processedHtml, title, author };
+    return { html: processedHtml, title, author, wordCount, fandom, warning, publishDate, completedDate, ao3Url };
   }
   
   // Not raw AO3 HTML, try to extract metadata but keep structure
@@ -55,7 +93,15 @@ export function processAO3Html(html: string): { html: string; title: string; aut
   let author = authorElement.text().trim();
   author = author.replace(/^by\s+/i, '');
   
-  return { html, title, author };
+  // For non-AO3 HTML, we don't have these metadata
+  const wordCount = '';
+  const fandom = '';
+  const warning = '';
+  const publishDate = '';
+  const completedDate = '';
+  const ao3Url = url || '';
+  
+  return { html, title, author, wordCount, fandom, warning, publishDate, completedDate, ao3Url };
 }
 
 export interface CleanHtmlOptions {
@@ -87,6 +133,13 @@ export interface CleanHtmlOptions {
   useAlternatingMargins: boolean;
   innerMargin: number;
   outerMargin: number;
+  wordCount?: string;
+  fandom?: string;
+  warning?: string;
+  publishDate?: string;
+  completedDate?: string;
+  ao3Url?: string;
+  binderName?: string;
 }
 
 /**
@@ -143,10 +196,38 @@ export function cleanHtml(html: string, options: CleanHtmlOptions): string {
   // Wrap first h1 and author in a title page div
   wrapTitleAndAuthor($);
 
-  // Add blank page after title page
+  // Add copyright/metadata page after title page (page 2)
   const $titlePage = $('.title-page').first();
   if ($titlePage.length) {
-    $titlePage.after('<div class="blank-page-after-title"></div>');
+    const title = options.customTitle || $('body > h1').first().text().trim() || '';
+    const author = options.customAuthor || $('.author').first().text().trim().replace(/^by\s+/i, '') || '';
+    const wordCount = options.wordCount || '';
+    const fandom = options.fandom || '';
+    const warning = options.warning || '';
+    const publishDate = options.publishDate || '';
+    const completedDate = options.completedDate || '';
+    const ao3Url = options.ao3Url || '';
+    const binderName = options.binderName || '';
+    
+    // Only show warning if it's not "No Archive Warnings Apply"
+    const shouldShowWarning = warning && !warning.includes('No Archive Warnings Apply');
+    
+    const copyrightPageContent = `
+      <div class="blank-page-after-title">
+        ${title ? `<p class="copyright-item copyright-title"><strong>${title}</strong></p>` : ''}
+        ${author ? `<p class="copyright-item copyright-author"><strong>by ${author}</strong></p>` : ''}
+        ${fandom ? `<p class="copyright-item">Fandom: ${fandom}</p>` : ''}
+        ${shouldShowWarning ? `<p class="copyright-item">Warning: ${warning}</p>` : ''}
+        ${wordCount ? `<p class="copyright-item">Word Count: ${wordCount}</p>` : ''}
+        ${publishDate ? `<p class="copyright-item">Published: ${publishDate}</p>` : ''}
+        ${completedDate ? `<p class="copyright-item">Completed: ${completedDate}</p>` : ''}
+        ${ao3Url ? `<p class="copyright-item">Original URL: ${ao3Url}</p>` : ''}
+        <p class="copyright-item">Typeset by yjzhang typesetter ${new Date().toISOString().split('T')[0]}</p>
+        ${binderName ? `<p class="copyright-item">Binded by: ${binderName}</p>` : ''}
+      </div>
+    `;
+    
+    $titlePage.after(copyrightPageContent);
   }
 
   // Remove ALL inline styles from the first preface (title/author page) to ensure proper centering
@@ -179,6 +260,9 @@ export function cleanHtml(html: string, options: CleanHtmlOptions): string {
 
   // Replace horizontal rules with dinkus
   replaceHrWithDinkus($, options.dinkusSymbol);
+
+  // Clean up unnecessary br tags
+  cleanupBrTags($);
 
   // Format chapter headings
   formatChapterHeadings($);
@@ -587,6 +671,88 @@ function markChapterOne($: cheerio.CheerioAPI): void {
 }
 
 /**
+ * Clean up unnecessary br tags
+ */
+function cleanupBrTags($: cheerio.CheerioAPI): void {
+  // Remove br tags that have no text content on one side
+  $('p, div').find('br').each(function() {
+    const $br = $(this);
+    const $parent = $br.parent();
+    
+    // Get all text before and after the br within the paragraph
+    const $p = $br.closest('p, div');
+    if (!$p.length) return;
+    
+    // Get the HTML and split by the br to check if there's text on both sides
+    let html = $p.html() || '';
+    
+    // Check if there's any actual text before this br (excluding tags)
+    let beforeBr = '';
+    let currentNode = $br[0];
+    
+    // Walk backwards through siblings and parents to get text before br
+    while (currentNode) {
+      let prev = currentNode.previousSibling;
+      while (prev) {
+        if (prev.nodeType === 3) { // Text node
+          beforeBr = (prev.nodeValue || '') + beforeBr;
+        } else if (prev.nodeType === 1) { // Element node
+          beforeBr = $(prev).text() + beforeBr;
+        }
+        prev = prev.previousSibling;
+      }
+      
+      // Move up to parent if not at paragraph level
+      currentNode = currentNode.parentNode as any;
+      if (!currentNode || $(currentNode).is('p, div')) {
+        break;
+      }
+    }
+    
+    // Get text after br
+    let afterBr = '';
+    currentNode = $br[0];
+    
+    // Walk forwards through siblings and parents to get text after br
+    while (currentNode) {
+      let next = currentNode.nextSibling;
+      while (next) {
+        if (next.nodeType === 3) { // Text node
+          afterBr = afterBr + (next.nodeValue || '');
+        } else if (next.nodeType === 1) { // Element node
+          afterBr = afterBr + $(next).text();
+        }
+        next = next.nextSibling;
+      }
+      
+      // Move up to parent if not at paragraph level
+      currentNode = currentNode.parentNode as any;
+      if (!currentNode || $(currentNode).is('p, div')) {
+        break;
+      }
+    }
+    
+    // Remove br if there's no text on one side
+    if (beforeBr.trim() === '' || afterBr.trim() === '') {
+      $br.remove();
+    }
+  });
+  
+  // Replace multiple consecutive br tags with a single one
+  $('br').each(function() {
+    const $br = $(this);
+    let $next = $br.next();
+    
+    // Remove consecutive br tags
+    while ($next.length && $next.is('br')) {
+      const $toRemove = $next;
+      $next = $next.next();
+      $toRemove.remove();
+    }
+  });
+}
+
+/**
  * Removes all empty elements throughout the document
  */
 function removeAllEmptyElements($: cheerio.CheerioAPI): void {
@@ -969,9 +1135,26 @@ function generateStyledHtml(bodyContent: string, options: CleanHtmlOptions, titl
           margin: 0.5em 0;
         }
         
-        /* Page 2: Blank page after title */
+        /* Page 2: Copyright/metadata page after title */
         .blank-page-after-title {
           page-break-after: always;
+          padding-top: 70vh;
+        }
+        
+        .copyright-item {
+          font-size: ${options.fontSize}pt;
+          font-family: 'Garamond', 'Times New Roman', serif;
+          font-weight: normal;
+          font-style: normal;
+          text-align: left;
+          text-indent: 0 !important;
+          margin: 0.2em 0;
+          line-height: 1.2;
+        }
+        
+        .copyright-title,
+        .copyright-author {
+          font-weight: bold;
         }
         
         
