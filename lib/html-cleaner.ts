@@ -1,74 +1,126 @@
 import * as cheerio from 'cheerio';
 
+/** Extract AO3 work metadata from raw or partially-processed HTML. */
+export function extractMetadataFromHtml(html: string): {
+  wordCount: string;
+  fandom: string;
+  warning: string;
+  publishDate: string;
+  completedDate: string;
+  ao3Url: string;
+} {
+  const $ = cheerio.load(html);
+
+  const metaEl = $('#typesetter-metadata');
+  if (metaEl.length) {
+    return {
+      wordCount: metaEl.attr('data-word-count') || '',
+      fandom: metaEl.attr('data-fandom') || '',
+      warning: metaEl.attr('data-warning') || '',
+      publishDate: metaEl.attr('data-publish-date') || '',
+      completedDate: metaEl.attr('data-completed-date') || '',
+      ao3Url: metaEl.attr('data-ao3-url') || '',
+    };
+  }
+
+  let wordCount = ($('dd.words').first().text() || $('dt:contains("Words")').next('dd').text()).trim();
+
+  let fandom = '';
+  const fandomEl =
+    $('.fandom.tags a.tag').first().length ? $('.fandom.tags a.tag').first() :
+    $('dd.fandom a.tag').first().length ? $('dd.fandom a.tag').first() :
+    $('dd.fandom a').first().length ? $('dd.fandom a').first() :
+    $('dt:contains("Fandom")').next('dd').find('a').first();
+  if (fandomEl.length) fandom = fandomEl.text().trim();
+  if (!fandom) {
+    $('dt').each(function () {
+      if (/fandom/i.test($(this).text())) {
+        fandom = $(this).next('dd').find('a').first().text().trim() ||
+                 $(this).next('dd').text().trim();
+        return false;
+      }
+    });
+  }
+
+  const warningElements = $('.warning.tags a.tag, dd.warning a.tag, dd.warning').toArray();
+  const warning = warningElements.map((el) => $(el).text().trim()).filter(Boolean).join(', ');
+
+  const publishDate = ($('dd.published').first().text() || $('dt:contains("Published")').next('dd').text()).trim();
+  const completedDate = (
+    $('dd.status').first().text() ||
+    $('dt:contains("Completed")').next('dd').text() ||
+    $('dt:contains("Updated")').next('dd').text()
+  ).trim();
+  const ao3Url = $('link[rel="canonical"]').attr('href') || $('meta[property="og:url"]').attr('content') || '';
+
+  return { wordCount, fandom, warning, publishDate, completedDate, ao3Url };
+}
+
+/** Extract title and author from raw AO3, typesetter-processed, or generic HTML. */
+export function extractTitleAuthorFromHtml(html: string): { title: string; author: string } {
+  const $ = cheerio.load(html);
+
+  const metaEl = $('#typesetter-metadata');
+  if (metaEl.length) {
+    const title = metaEl.attr('data-title') || '';
+    const author = (metaEl.attr('data-author') || '').replace(/^by\s+/i, '');
+    if (title || author) return { title, author };
+  }
+
+  const title =
+    $('.title-page h1').first().text().trim() ||
+    $('.half-title-text').first().text().trim() ||
+    $('.copyright-title').first().text().trim() ||
+    $('.work .title.heading').first().text().trim() ||
+    $('.preface .title.heading').first().text().trim() ||
+    $('h2.title.heading').first().text().trim() ||
+    $('.meta h1').first().text().trim() ||
+    $('body h1').first().text().trim() ||
+    $('title').text().split(' - ')[0].trim();
+
+  let author =
+    $('.title-page .author').first().text().trim() ||
+    $('.copyright-author').first().text().trim() ||
+    $('.byline a[rel="author"]').first().text().trim() ||
+    $('.byline').first().text().trim() ||
+    $('.author').first().text().trim();
+  author = author.replace(/^by\s+/i, '');
+
+  return { title, author };
+}
+
+const escapeAttr = (text: string): string => text.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+
 /**
  * Processes raw AO3 HTML into a clean, standardized structure
  * This is the first step that both fetched and uploaded HTML go through
  */
 export function processAO3Html(html: string, url?: string): { html: string; title: string; author: string; wordCount: string; fandom: string; warning: string; publishDate: string; completedDate: string; ao3Url: string } {
   const $ = cheerio.load(html);
-  
-  // Check if this is raw AO3 HTML (has AO3-specific elements)
-  const isRawAO3 = $('#workskin, #chapters, .preface, #preface').length > 0;
-  
+
+  const isAlreadyProcessed = $('.title-page').length > 0 || $('#typesetter-metadata').length > 0;
+  const isRawAO3 = !isAlreadyProcessed && $('#workskin, #chapters, .preface, #preface').length > 0;
+
+  if (isAlreadyProcessed) {
+    const { title, author } = extractTitleAuthorFromHtml(html);
+    const { wordCount, fandom, warning, publishDate, completedDate, ao3Url: metaUrl } = extractMetadataFromHtml(html);
+    const ao3Url = url || metaUrl;
+    return { html, title, author, wordCount, fandom, warning, publishDate, completedDate, ao3Url };
+  }
+
   if (isRawAO3) {
     // Extract the work content
     const workContent = $('#workskin, #chapters').html() || '';
-    
-    // Extract title and author - try multiple selectors in order
-    let title = $('.work .title.heading').first().text().trim() || // Fetched AO3 page
-                $('.preface .title.heading').first().text().trim() || // Downloaded AO3 HTML
-                $('h2.title.heading').first().text().trim() || // Alternative structure
-                $('.meta h1').first().text().trim() || // Preface meta
-                $('h1.heading').first().text().trim() || // Generic heading
-                $('title').text().split(' - ')[0].trim(); // Fallback to page title
-    
-    const authorElement = $('.byline a[rel="author"]').first().length 
-      ? $('.byline a[rel="author"]').first() // Fetched AO3 (link)
-      : $('.byline').first(); // Downloaded AO3 or generic
-    let author = authorElement.text().trim();
-    
-    // Clean up author - remove "by " prefix if present
-    author = author.replace(/^by\s+/i, '');
-    
-    // Extract word count
-    let wordCount = '';
-    const statsText = $('dd.words').text().trim();
-    if (statsText) {
-      wordCount = statsText;
-    }
-    
-    // Extract fandom (first one if multiple)
-    let fandom = '';
-    const fandomElement = $('.fandom.tags a.tag').first();
-    if (fandomElement.length) {
-      fandom = fandomElement.text().trim();
-    }
-    
-    // Extract warning (archive warnings)
-    let warning = '';
-    const warningElements = $('.warning.tags a.tag, dd.warning').toArray();
-    if (warningElements.length) {
-      warning = warningElements.map(el => $(el).text().trim()).filter(w => w).join(', ');
-    }
-    
-    // Extract publish date
-    let publishDate = '';
-    const publishElement = $('dd.published').text().trim();
-    if (publishElement) {
-      publishDate = publishElement;
-    }
-    
-    // Extract completed date
-    let completedDate = '';
-    const completedElement = $('dd.status').text().trim();
-    if (completedElement) {
-      completedDate = completedElement;
-    }
-    
-    // Use provided URL or try to extract from meta
-    const ao3Url = url || $('link[rel="canonical"]').attr('href') || '';
-    
-    // Create a clean HTML document
+
+    let { title, author } = extractTitleAuthorFromHtml(html);
+
+    // Extract word count, fandom, dates via shared helper
+    const { wordCount, fandom, warning, publishDate, completedDate, ao3Url: metaUrl } = extractMetadataFromHtml(html);
+    const ao3Url = url || metaUrl;
+
+    // Embed metadata in htmlContent so PDF generation can always recover it
+    const metadataBlock = `<div id="typesetter-metadata" hidden data-title="${escapeAttr(title)}" data-author="${escapeAttr(author)}" data-word-count="${escapeAttr(wordCount)}" data-fandom="${escapeAttr(fandom)}" data-warning="${escapeAttr(warning)}" data-publish-date="${escapeAttr(publishDate)}" data-completed-date="${escapeAttr(completedDate)}" data-ao3-url="${escapeAttr(ao3Url)}"></div>`;
+
     const processedHtml = `
       <!DOCTYPE html>
       <html>
@@ -77,30 +129,21 @@ export function processAO3Html(html: string, url?: string): { html: string; titl
         <title>${title || 'Story'}</title>
       </head>
       <body>
+        ${metadataBlock}
         <h1>${title || 'Story'}</h1>
         ${author ? `<p class="author">by ${author}</p>` : ''}
         ${workContent}
       </body>
       </html>
     `;
-    
+
     return { html: processedHtml, title, author, wordCount, fandom, warning, publishDate, completedDate, ao3Url };
   }
-  
-  // Not raw AO3 HTML, try to extract metadata but keep structure
-  const title = $('body > h1, h1.title, h1.heading').first().text().trim();
-  const authorElement = $('.author, .byline, h3.byline, div.byline').first();
-  let author = authorElement.text().trim();
-  author = author.replace(/^by\s+/i, '');
-  
-  // For non-AO3 HTML, we don't have these metadata
-  const wordCount = '';
-  const fandom = '';
-  const warning = '';
-  const publishDate = '';
-  const completedDate = '';
-  const ao3Url = url || '';
-  
+
+  const { title, author } = extractTitleAuthorFromHtml(html);
+  const { wordCount, fandom, warning, publishDate, completedDate, ao3Url: metaUrl } = extractMetadataFromHtml(html);
+  const ao3Url = url || metaUrl;
+
   return { html, title, author, wordCount, fandom, warning, publishDate, completedDate, ao3Url };
 }
 
@@ -148,6 +191,14 @@ export interface CleanHtmlOptions {
  * @param options - Options for cleaning and formatting
  * @returns Cleaned and styled HTML ready for PDF generation
  */
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
 export function cleanHtml(html: string, options: CleanHtmlOptions): string {
   const $ = cheerio.load(html);
 
@@ -196,10 +247,12 @@ export function cleanHtml(html: string, options: CleanHtmlOptions): string {
   // Wrap first h1 and author in a title page div
   wrapTitleAndAuthor($);
 
-  // Add copyright/metadata page after title page (page 2)
+  // Build pages 2-4 explicitly so they always exist regardless of AO3 structure.
   const $titlePage = $('.title-page').first();
-  if ($titlePage.length) {
-    const title = options.customTitle || $('body > h1').first().text().trim() || '';
+  const $insertAfter = $titlePage.length ? $titlePage : $('body h1').first();
+
+  if ($insertAfter.length || options.customTitle) {
+    const title = options.customTitle || $('.title-page h1').first().text().trim() || $('body > h1').first().text().trim() || '';
     const author = options.customAuthor || $('.author').first().text().trim().replace(/^by\s+/i, '') || '';
     const wordCount = options.wordCount || '';
     const fandom = options.fandom || '';
@@ -208,55 +261,50 @@ export function cleanHtml(html: string, options: CleanHtmlOptions): string {
     const completedDate = options.completedDate || '';
     const ao3Url = options.ao3Url || '';
     const binderName = options.binderName || '';
-    
-    // Only show warning if it's not "No Archive Warnings Apply"
+
     const shouldShowWarning = warning && !warning.includes('No Archive Warnings Apply');
-    
+
     const copyrightPageContent = `
       <div class="blank-page-after-title">
-        ${title ? `<p class="copyright-item copyright-title"><strong>${title}</strong></p>` : ''}
-        ${author ? `<p class="copyright-item copyright-author"><strong>by ${author}</strong></p>` : ''}
-        ${fandom ? `<p class="copyright-item">Fandom: ${fandom}</p>` : ''}
-        ${shouldShowWarning ? `<p class="copyright-item">Warning: ${warning}</p>` : ''}
-        ${wordCount ? `<p class="copyright-item">Word Count: ${wordCount}</p>` : ''}
-        ${publishDate ? `<p class="copyright-item">Published: ${publishDate}</p>` : ''}
-        ${completedDate ? `<p class="copyright-item">Completed: ${completedDate}</p>` : ''}
-        ${ao3Url ? `<p class="copyright-item">Original URL: ${ao3Url}</p>` : ''}
-        <p class="copyright-item">Typeset by yjzhang typesetter ${new Date().toISOString().split('T')[0]}</p>
-        ${binderName ? `<p class="copyright-item">Binded by: ${binderName}</p>` : ''}
+        ${title ? `<p class="copyright-item copyright-title"><strong>${escapeHtml(title)}</strong></p>` : ''}
+        ${author ? `<p class="copyright-item copyright-author"><strong>by ${escapeHtml(author)}</strong></p>` : ''}
+        ${fandom ? `<p class="copyright-item copyright-fandom">Fandom: ${escapeHtml(fandom)}</p>` : ''}
+        ${shouldShowWarning ? `<p class="copyright-item copyright-warning">Warning: ${escapeHtml(warning)}</p>` : ''}
+        ${wordCount ? `<p class="copyright-item copyright-word-count">Word Count: ${escapeHtml(wordCount)}</p>` : ''}
+        ${publishDate ? `<p class="copyright-item copyright-publish-date">Published: ${escapeHtml(publishDate)}</p>` : ''}
+        ${completedDate ? `<p class="copyright-item copyright-completed-date">Completed: ${escapeHtml(completedDate)}</p>` : ''}
+        ${ao3Url ? `<p class="copyright-item copyright-ao3-url">Original URL: ${escapeHtml(ao3Url)}</p>` : ''}
+        <p class="copyright-item copyright-typesetter">Typeset by yjzhang typesetter ${new Date().toISOString().split('T')[0]}</p>
+        ${binderName ? `<p class="copyright-item copyright-binder-name">Binded by: ${escapeHtml(binderName)}</p>` : ''}
       </div>
     `;
-    
-    $titlePage.after(copyrightPageContent);
+
+    // Insert page 2 (copyright)
+    $insertAfter.after(copyrightPageContent);
+    const $copyright = $insertAfter.next('.blank-page-after-title');
+
+    // Insert page 3 (half-title — title only, centered)
+    const $halfTitle = $('<div class="half-title-page"><p class="half-title-text"></p></div>');
+    $halfTitle.find('.half-title-text').text(title);
+    $copyright.after($halfTitle);
+
+    // Insert page 4 (blank)
+    $halfTitle.after('<div class="blank-page-after-preface"></div>');
+
+    // Remove the AO3 work-level preface — its job is now done by the half-title page.
+    // Chapter-level prefaces (inside .chapter divs) are left in place.
+    $('body > div.preface:not(.chapter), #chapters > .preface:not(.chapter)').first().remove();
   }
 
-  // Remove ALL inline styles from the first preface (title/author page) to ensure proper centering
-  const $firstPreface = $('body > div.preface:not(.chapter), #chapters > .preface:not(.chapter)').first();
-  if ($firstPreface.length) {
-    $firstPreface.removeAttr('style');
-    // Also remove inline styles from children
-    $firstPreface.find('*').removeAttr('style');
-  }
-  
-  // For other prefaces (like chapter prefaces), just remove page-break-before
-  $('.preface').not($firstPreface).each(function() {
-    const $preface = $(this);
-    const style = $preface.attr('style');
+  // Strip page-break-before from all remaining preface elements (chapter author-notes sections)
+  $('.preface').each(function () {
+    const $p = $(this);
+    const style = $p.attr('style');
     if (style) {
-      const newStyle = style.replace(/page-break-before\s*:\s*always\s*;?/gi, '').trim();
-      if (newStyle) {
-        $preface.attr('style', newStyle);
-      } else {
-        $preface.removeAttr('style');
-      }
+      const cleaned = style.replace(/page-break-before\s*:\s*always\s*;?/gi, '').trim();
+      if (cleaned) $p.attr('style', cleaned); else $p.removeAttr('style');
     }
   });
-
-  // Add blank page after preface (second title/author)
-  const $preface = $('body > div.preface:not(.chapter), #chapters > .preface:not(.chapter)').first();
-  if ($preface.length) {
-    $preface.after('<div class="blank-page-after-preface"></div>');
-  }
 
   // Replace horizontal rules with dinkus
   replaceHrWithDinkus($, options.dinkusSymbol);
@@ -267,8 +315,11 @@ export function cleanHtml(html: string, options: CleanHtmlOptions): string {
   // Format chapter headings
   formatChapterHeadings($);
   
-  // Mark Chapter 1 for page numbering if needed
-  if (options.showPageNumbers && options.hidePageNumbersUntilChapter1) {
+  // Mark the first chapter for headers/page numbers that hide until chapter 1
+  const needsChapterMark =
+    (options.showPageNumbers && options.hidePageNumbersUntilChapter1) ||
+    (options.showHeaders && options.hideHeadersUntilChapter1);
+  if (needsChapterMark) {
     markChapterOne($);
   }
 
@@ -479,7 +530,9 @@ function cleanAuthorElements($: cheerio.CheerioAPI): void {
 function applyCustomTitleAuthor($: cheerio.CheerioAPI, customTitle: string, customAuthor: string): void {
   // Update main title if custom title provided
   if (customTitle) {
-    const $firstH1 = $('body > h1').first();
+    const $firstH1 = $('.title-page h1').first().length
+      ? $('.title-page h1').first()
+      : $('body h1').first();
     if ($firstH1.length) {
       $firstH1.text(customTitle);
     }
@@ -515,19 +568,16 @@ function applyCustomTitleAuthor($: cheerio.CheerioAPI, customTitle: string, cust
  * Wraps the first h1 and author in a title-page div
  */
 function wrapTitleAndAuthor($: cheerio.CheerioAPI): void {
-  const $firstH1 = $('body > h1').first();
-  const $author = $firstH1.next('.author');
-  
-  if ($firstH1.length && $author.length) {
-    // Create a wrapper div
+  if ($('.title-page').length) return;
+
+  const $firstH1 = $('body h1').first();
+  const $author = $('.author').first();
+
+  if ($firstH1.length) {
     const $wrapper = $('<div class="title-page"></div>');
-    
-    // Insert the wrapper before the h1
     $firstH1.before($wrapper);
-    
-    // Move h1 and author into the wrapper
     $wrapper.append($firstH1);
-    $wrapper.append($author);
+    if ($author.length) $wrapper.append($author);
   }
 }
 
@@ -638,35 +688,52 @@ function addChapterPageBreaks($: cheerio.CheerioAPI): void {
 }
 
 /**
- * Finds and marks the element containing "Chapter 1" for page numbering
+ * Marks the first chapter element so headers/page numbers know when to start showing.
+ * Prefers the element containing literal "Chapter 1" text; falls back to the first
+ * .chapter element so documents that don't use that wording still work.
  */
 function markChapterOne($: cheerio.CheerioAPI): void {
-  // Search for "Chapter 1" (case insensitive) in various elements
   const selectors = [
-    '.chapter', '.chapter-heading-wrapper', 
-    'h1', 'h2', 'h3', 
+    '.chapter', '.chapter-heading-wrapper',
+    'h1', 'h2', 'h3',
     '[class*="chapter"]',
-    'div', 'section'
+    'div', 'section',
   ];
-  
+
+  // First pass: look for literal "Chapter 1" (or "Chapter One" / "Chapter I")
   let found = false;
-  
   for (const selector of selectors) {
     if (found) break;
-    
-    $(selector).each(function() {
+    $(selector).each(function () {
       if (found) return;
-      
-      const $el = $(this);
-      const text = $el.text().trim();
-      
-      // Check if text contains "chapter 1" (case insensitive)
-      if (/chapter\s*1(?:\s|:|$)/i.test(text)) {
-        $el.addClass('chapter-one-start');
+      const text = $(this).text().trim();
+      if (/chapter\s*(1|one|i)(?:\s|:|$)/i.test(text)) {
+        $(this).addClass('chapter-one-start');
         found = true;
-        return false; // Break the loop
+        return false;
       }
     });
+  }
+
+  // Fallbacks in priority order — try increasingly broad patterns
+  if (!found) {
+    // AO3 first chapter by id
+    const byId = $('#chapter-1').first();
+    if (byId.length) { byId.addClass('chapter-one-start'); found = true; }
+  }
+  if (!found) {
+    // AO3 chapter preface group (first chapter's preface wrapper)
+    const byPreface = $('div.chapter.preface.group, div.chapter.preface').first();
+    if (byPreface.length) { byPreface.addClass('chapter-one-start'); found = true; }
+  }
+  if (!found) {
+    // First h3.title (AO3 chapter title heading)
+    const byTitle = $('h3.title').first();
+    if (byTitle.length) { byTitle.addClass('chapter-one-start'); found = true; }
+  }
+  if (!found) {
+    // Last resort: first element with any .chapter class
+    $('.chapter').first().addClass('chapter-one-start');
   }
 }
 
@@ -775,7 +842,7 @@ function removeAllEmptyElements($: cheerio.CheerioAPI): void {
         const html = $elem.html()?.trim() || '';
         
         // Skip elements that are intentionally empty (like blank pages)
-        if ($elem.hasClass('blank-page-after-title') || $elem.hasClass('blank-page-after-preface')) {
+        if ($elem.hasClass('blank-page-after-title') || $elem.hasClass('blank-page-after-preface') || $elem.attr('id') === 'typesetter-metadata') {
           return;
         }
         
@@ -869,7 +936,6 @@ function generateStyledHtml(bodyContent: string, options: CleanHtmlOptions, titl
             content: "${author.replace(/"/g, '\\"')}";
             font-size: ${options.fontSize * 0.8}pt;
             font-family: 'Garamond', 'Times New Roman', serif;
-            font-style: italic;
             margin-bottom: -0.2in;
           }
         }
@@ -909,7 +975,6 @@ function generateStyledHtml(bodyContent: string, options: CleanHtmlOptions, titl
             content: "${author.replace(/"/g, '\\"')}";
             font-size: ${options.fontSize * 0.8}pt;
             font-family: 'Garamond', 'Times New Roman', serif;
-            font-style: italic;
             margin-bottom: -0.15in;
           }
           ` : ''}
@@ -1115,7 +1180,7 @@ function generateStyledHtml(bodyContent: string, options: CleanHtmlOptions, titl
         }
         
         .author {
-          font-style: italic;
+          font-style: normal;
           text-align: center !important;
           text-indent: 0 !important;
           margin-bottom: 0;

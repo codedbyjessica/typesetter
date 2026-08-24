@@ -158,8 +158,11 @@ export default function Home() {
       
       try {
         // Process through the same function as AO3 fetch
-        const { processAO3Html } = await import('@/lib/html-cleaner');
-        const { html, title, author, wordCount, fandom, warning, publishDate, completedDate, ao3Url } = processAO3Html(content);
+        const { processAO3Html, extractTitleAuthorFromHtml } = await import('@/lib/html-cleaner');
+        const { html, title: extractedTitle, author: extractedAuthor, wordCount, fandom, warning, publishDate, completedDate, ao3Url } = processAO3Html(content);
+        const fallback = extractTitleAuthorFromHtml(html);
+        const title = extractedTitle || fallback.title;
+        const author = extractedAuthor || fallback.author;
         
         setHtmlContent(html);
         setError('');
@@ -215,6 +218,11 @@ export default function Home() {
 
       const data = await response.json();
       setHtmlContent(data.html);
+
+      const { extractTitleAuthorFromHtml } = await import('@/lib/html-cleaner');
+      const fallback = extractTitleAuthorFromHtml(data.html);
+      const title = data.title || fallback.title;
+      const author = data.author || fallback.author;
       
       // Clear any uploaded file input
       const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
@@ -224,8 +232,8 @@ export default function Home() {
       setUploadedFileName('');
       
       // Use title/author from API (already extracted by shared processAO3Html function)
-      updateSetting('customTitle', data.title || '');
-      updateSetting('customAuthor', data.author || '');
+      updateSetting('customTitle', title);
+      updateSetting('customAuthor', author);
       setMetadata({ wordCount: data.wordCount, fandom: data.fandom, warning: data.warning, publishDate: data.publishDate, completedDate: data.completedDate, ao3Url: data.ao3Url });
       setMetadataLoaded(true);
     } catch (err) {
@@ -244,11 +252,22 @@ export default function Home() {
     setLoading(true);
     setError('');
 
-    const options = { ...settings, ...metadata };
-
     try {
+      const { cleanHtml, extractMetadataFromHtml } = await import('@/lib/html-cleaner');
+      const extracted = extractMetadataFromHtml(htmlContent);
+      const options = {
+        ...settings,
+        ...extracted,
+        ...metadata,
+        wordCount: metadata.wordCount || extracted.wordCount,
+        fandom: metadata.fandom || extracted.fandom,
+        warning: metadata.warning || extracted.warning,
+        publishDate: metadata.publishDate || extracted.publishDate,
+        completedDate: metadata.completedDate || extracted.completedDate,
+        ao3Url: metadata.ao3Url || extracted.ao3Url,
+      };
+
       if (downloadFormat === 'pdf') {
-        const { cleanHtml } = await import('@/lib/html-cleaner');
         const { generatePdf } = await import('@/lib/pdf-generator');
 
         const cleanedHtml = cleanHtml(htmlContent, options);
@@ -303,9 +322,21 @@ export default function Home() {
     setLoading(true);
     setError('');
 
-    const options = { ...settings, ...metadata };
-
     try {
+      const { extractMetadataFromHtml } = await import('@/lib/html-cleaner');
+      const extracted = extractMetadataFromHtml(htmlContent);
+      const options = {
+        ...settings,
+        ...extracted,
+        ...metadata,
+        wordCount: metadata.wordCount || extracted.wordCount,
+        fandom: metadata.fandom || extracted.fandom,
+        warning: metadata.warning || extracted.warning,
+        publishDate: metadata.publishDate || extracted.publishDate,
+        completedDate: metadata.completedDate || extracted.completedDate,
+        ao3Url: metadata.ao3Url || extracted.ao3Url,
+      };
+
       const htmlResponse = await fetch('/api/preview-html', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
