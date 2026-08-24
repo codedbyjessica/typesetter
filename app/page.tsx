@@ -248,21 +248,12 @@ export default function Home() {
 
     try {
       if (downloadFormat === 'pdf') {
-        // Generate and download PDF
-        const pdfResponse = await fetch('/api/generate-pdf', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            html: htmlContent,
-            options,
-          }),
-        });
+        const { cleanHtml } = await import('@/lib/html-cleaner');
+        const { generatePdf } = await import('@/lib/pdf-generator');
 
-        if (!pdfResponse.ok) {
-          throw new Error('Failed to generate PDF');
-        }
-
-        const pdfBlob = await pdfResponse.blob();
+        const cleanedHtml = cleanHtml(htmlContent, options);
+        const pdfBytes = await generatePdf(cleanedHtml, options);
+        const pdfBlob = new Blob([pdfBytes as unknown as BlobPart], { type: 'application/pdf' });
         const pdfUrl = window.URL.createObjectURL(pdfBlob);
         const pdfLink = document.createElement('a');
         pdfLink.href = pdfUrl;
