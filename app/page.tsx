@@ -213,7 +213,15 @@ export default function Home() {
       });
 
       if (!response.ok) {
-        throw new Error('Failed to fetch from AO3');
+        // Prefer the API's specific message; gateway timeouts (504) come back as non-JSON.
+        let message = '';
+        try {
+          message = (await response.json())?.error ?? '';
+        } catch {}
+        if (!message && response.status === 504) {
+          message = 'AO3 took too long to respond. Try again in a moment, or: On AO3, use Download → HTML, then upload that file here instead.';
+        }
+        throw new Error(message || 'Failed to fetch from AO3');
       }
 
       const data = await response.json();
