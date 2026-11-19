@@ -1,4 +1,5 @@
 import * as cheerio from 'cheerio';
+import type { AnyNode } from 'domhandler';
 
 /** Extract AO3 work metadata from raw or partially-processed HTML. */
 export function extractMetadataFromHtml(html: string): {
@@ -23,7 +24,7 @@ export function extractMetadataFromHtml(html: string): {
     };
   }
 
-  let wordCount = ($('dd.words').first().text() || $('dt:contains("Words")').next('dd').text()).trim();
+  const wordCount = ($('dd.words').first().text() || $('dt:contains("Words")').next('dd').text()).trim();
 
   let fandom = '';
   const fandomEl =
@@ -89,7 +90,12 @@ export function extractTitleAuthorFromHtml(html: string): { title: string; autho
   return { title, author };
 }
 
-const escapeAttr = (text: string): string => text.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+const escapeHtml = (text: string): string =>
+  text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
 
 /**
  * Processes raw AO3 HTML into a clean, standardized structure
@@ -101,37 +107,28 @@ export function processAO3Html(html: string, url?: string): { html: string; titl
   const isAlreadyProcessed = $('.title-page').length > 0 || $('#typesetter-metadata').length > 0;
   const isRawAO3 = !isAlreadyProcessed && $('#workskin, #chapters, .preface, #preface').length > 0;
 
-  if (isAlreadyProcessed) {
-    const { title, author } = extractTitleAuthorFromHtml(html);
-    const { wordCount, fandom, warning, publishDate, completedDate, ao3Url: metaUrl } = extractMetadataFromHtml(html);
-    const ao3Url = url || metaUrl;
-    return { html, title, author, wordCount, fandom, warning, publishDate, completedDate, ao3Url };
-  }
+  const { title, author } = extractTitleAuthorFromHtml(html);
+  const { wordCount, fandom, warning, publishDate, completedDate, ao3Url: metaUrl } = extractMetadataFromHtml(html);
+  const ao3Url = url || metaUrl;
 
   if (isRawAO3) {
     // Extract the work content
     const workContent = $('#workskin, #chapters').html() || '';
 
-    let { title, author } = extractTitleAuthorFromHtml(html);
-
-    // Extract word count, fandom, dates via shared helper
-    const { wordCount, fandom, warning, publishDate, completedDate, ao3Url: metaUrl } = extractMetadataFromHtml(html);
-    const ao3Url = url || metaUrl;
-
     // Embed metadata in htmlContent so PDF generation can always recover it
-    const metadataBlock = `<div id="typesetter-metadata" hidden data-title="${escapeAttr(title)}" data-author="${escapeAttr(author)}" data-word-count="${escapeAttr(wordCount)}" data-fandom="${escapeAttr(fandom)}" data-warning="${escapeAttr(warning)}" data-publish-date="${escapeAttr(publishDate)}" data-completed-date="${escapeAttr(completedDate)}" data-ao3-url="${escapeAttr(ao3Url)}"></div>`;
+    const metadataBlock = `<div id="typesetter-metadata" hidden data-title="${escapeHtml(title)}" data-author="${escapeHtml(author)}" data-word-count="${escapeHtml(wordCount)}" data-fandom="${escapeHtml(fandom)}" data-warning="${escapeHtml(warning)}" data-publish-date="${escapeHtml(publishDate)}" data-completed-date="${escapeHtml(completedDate)}" data-ao3-url="${escapeHtml(ao3Url)}"></div>`;
 
     const processedHtml = `
       <!DOCTYPE html>
       <html>
       <head>
         <meta charset="UTF-8">
-        <title>${title || 'Story'}</title>
+        <title>${escapeHtml(title || 'Story')}</title>
       </head>
       <body>
         ${metadataBlock}
-        <h1>${title || 'Story'}</h1>
-        ${author ? `<p class="author">by ${author}</p>` : ''}
+        <h1>${escapeHtml(title || 'Story')}</h1>
+        ${author ? `<p class="author">by ${escapeHtml(author)}</p>` : ''}
         ${workContent}
       </body>
       </html>
@@ -140,17 +137,14 @@ export function processAO3Html(html: string, url?: string): { html: string; titl
     return { html: processedHtml, title, author, wordCount, fandom, warning, publishDate, completedDate, ao3Url };
   }
 
-  const { title, author } = extractTitleAuthorFromHtml(html);
-  const { wordCount, fandom, warning, publishDate, completedDate, ao3Url: metaUrl } = extractMetadataFromHtml(html);
-  const ao3Url = url || metaUrl;
-
+  // Already-processed or generic HTML passes through unchanged
   return { html, title, author, wordCount, fandom, warning, publishDate, completedDate, ao3Url };
 }
 
 export interface CleanHtmlOptions {
   removeEndnotes: boolean;
   removeImages: boolean;
-  removeFootnotes: boolean;
+  removeAfterword: boolean;
   removeChapterNotes: boolean;
   removeSummary: boolean;
   fontSize: number;
@@ -185,20 +179,50 @@ export interface CleanHtmlOptions {
   binderName?: string;
 }
 
+export interface CopyrightItem {
+  key: string;
+  text: string;
+  bold: boolean;
+}
+
+/**
+ * The lines on the copyright page (page 2). Single source of truth for both the
+ * HTML output and the PDF generator.
+ */
+export function buildCopyrightItems(meta: {
+  title?: string;
+  author?: string;
+  fandom?: string;
+  warning?: string;
+  wordCount?: string;
+  publishDate?: string;
+  completedDate?: string;
+  ao3Url?: string;
+  binderName?: string;
+}): CopyrightItem[] {
+  const author = (meta.author || '').replace(/^by\s+/i, '');
+  const showWarning = !!meta.warning && !meta.warning.includes('No Archive Warnings Apply');
+  const items: (CopyrightItem | false)[] = [
+    !!meta.title && { key: 'title', text: meta.title, bold: true },
+    !!author && { key: 'author', text: `by ${author}`, bold: true },
+    !!meta.fandom && { key: 'fandom', text: `Fandom: ${meta.fandom}`, bold: false },
+    showWarning && { key: 'warning', text: `Warning: ${meta.warning}`, bold: false },
+    !!meta.wordCount && { key: 'word-count', text: `Word Count: ${meta.wordCount}`, bold: false },
+    !!meta.publishDate && { key: 'publish-date', text: `Published: ${meta.publishDate}`, bold: false },
+    !!meta.completedDate && { key: 'completed-date', text: `Completed: ${meta.completedDate}`, bold: false },
+    !!meta.ao3Url && { key: 'ao3-url', text: `Original URL: ${meta.ao3Url}`, bold: false },
+    { key: 'typesetter', text: `Typeset by yjzhang typesetter ${new Date().toISOString().split('T')[0]}`, bold: false },
+    !!meta.binderName && { key: 'binder-name', text: `Binded by: ${meta.binderName}`, bold: false },
+  ];
+  return items.filter((item): item is CopyrightItem => !!item);
+}
+
 /**
  * Cleans and formats HTML content for PDF generation
  * @param html - The raw HTML content to clean
  * @param options - Options for cleaning and formatting
  * @returns Cleaned and styled HTML ready for PDF generation
  */
-function escapeHtml(text: string): string {
-  return text
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
-}
-
 export function cleanHtml(html: string, options: CleanHtmlOptions): string {
   const $ = cheerio.load(html);
 
@@ -207,9 +231,9 @@ export function cleanHtml(html: string, options: CleanHtmlOptions): string {
     removeEndnotes($);
   }
 
-  // Remove footnotes
-  if (options.removeFootnotes) {
-    removeFootnotes($);
+  // Remove afterword (end-of-work notes, series links)
+  if (options.removeAfterword) {
+    removeAfterword($);
   }
 
   // Remove chapter notes
@@ -254,28 +278,14 @@ export function cleanHtml(html: string, options: CleanHtmlOptions): string {
   if ($insertAfter.length || options.customTitle) {
     const title = options.customTitle || $('.title-page h1').first().text().trim() || $('body > h1').first().text().trim() || '';
     const author = options.customAuthor || $('.author').first().text().trim().replace(/^by\s+/i, '') || '';
-    const wordCount = options.wordCount || '';
-    const fandom = options.fandom || '';
-    const warning = options.warning || '';
-    const publishDate = options.publishDate || '';
-    const completedDate = options.completedDate || '';
-    const ao3Url = options.ao3Url || '';
-    const binderName = options.binderName || '';
-
-    const shouldShowWarning = warning && !warning.includes('No Archive Warnings Apply');
-
     const copyrightPageContent = `
       <div class="blank-page-after-title">
-        ${title ? `<p class="copyright-item copyright-title"><strong>${escapeHtml(title)}</strong></p>` : ''}
-        ${author ? `<p class="copyright-item copyright-author"><strong>by ${escapeHtml(author)}</strong></p>` : ''}
-        ${fandom ? `<p class="copyright-item copyright-fandom">Fandom: ${escapeHtml(fandom)}</p>` : ''}
-        ${shouldShowWarning ? `<p class="copyright-item copyright-warning">Warning: ${escapeHtml(warning)}</p>` : ''}
-        ${wordCount ? `<p class="copyright-item copyright-word-count">Word Count: ${escapeHtml(wordCount)}</p>` : ''}
-        ${publishDate ? `<p class="copyright-item copyright-publish-date">Published: ${escapeHtml(publishDate)}</p>` : ''}
-        ${completedDate ? `<p class="copyright-item copyright-completed-date">Completed: ${escapeHtml(completedDate)}</p>` : ''}
-        ${ao3Url ? `<p class="copyright-item copyright-ao3-url">Original URL: ${escapeHtml(ao3Url)}</p>` : ''}
-        <p class="copyright-item copyright-typesetter">Typeset by yjzhang typesetter ${new Date().toISOString().split('T')[0]}</p>
-        ${binderName ? `<p class="copyright-item copyright-binder-name">Binded by: ${escapeHtml(binderName)}</p>` : ''}
+        ${buildCopyrightItems({ ...options, title, author })
+          .map((item) => {
+            const text = escapeHtml(item.text);
+            return `<p class="copyright-item copyright-${item.key}">${item.bold ? `<strong>${text}</strong>` : text}</p>`;
+          })
+          .join('\n')}
       </div>
     `;
 
@@ -338,8 +348,8 @@ export function cleanHtml(html: string, options: CleanHtmlOptions): string {
   const bodyContent = $('body').html() || $.html();
 
   // Extract title and author for headers
-  let title = options.customTitle || $('body > h1').first().text().trim() || '';
-  let author = options.customAuthor || $('.author').first().text().trim().replace(/^by\s+/i, '') || '';
+  const title = options.customTitle || $('body > h1').first().text().trim() || '';
+  const author = options.customAuthor || $('.author').first().text().trim().replace(/^by\s+/i, '') || '';
 
   // Create final HTML with styles
   return generateStyledHtml(bodyContent, options, title, author);
@@ -358,7 +368,7 @@ function removeEndnotes($: cheerio.CheerioAPI): void {
   // Remove "Chapter End Notes" paragraphs and their following blockquotes
   $('p').each(function() {
     const text = $(this).text().trim();
-    if (text === 'Chapter End Notes' || text === 'End Notes' || text.toLowerCase() === 'chapter end notes') {
+    if (/^(chapter )?end notes$/i.test(text)) {
       // Remove the next blockquote if it exists
       const nextElem = $(this).next();
       if (nextElem.is('blockquote')) {
@@ -373,7 +383,7 @@ function removeEndnotes($: cheerio.CheerioAPI): void {
 /**
  * Removes afterword sections from the document
  */
-function removeFootnotes($: cheerio.CheerioAPI): void {
+function removeAfterword($: cheerio.CheerioAPI): void {
   // Remove afterword sections (AO3 format)
   $('.afterword').remove();
   
@@ -396,7 +406,7 @@ function removeChapterNotes($: cheerio.CheerioAPI): void {
   // Find paragraphs that say "Chapter Notes" and remove them along with following elements
   $('p').each(function() {
     const text = $(this).text().trim();
-    if (text === 'Chapter Notes' || text === 'Chapter notes' || text.toLowerCase() === 'chapter notes') {
+    if (text.toLowerCase() === 'chapter notes') {
       // Get the next siblings that are part of the chapter notes
       let nextElem = $(this).next();
       
@@ -429,7 +439,7 @@ function removeChapterNotes($: cheerio.CheerioAPI): void {
 function removeChapterTextHeadings($: cheerio.CheerioAPI): void {
   $('h1, h2, h3, h4, h5, h6').each(function() {
     const text = $(this).text().trim();
-    if (text === 'Chapter Text' || text.toLowerCase() === 'chapter text') {
+    if (text.toLowerCase() === 'chapter text') {
       $(this).remove();
     }
   });
@@ -744,18 +754,11 @@ function cleanupBrTags($: cheerio.CheerioAPI): void {
   // Remove br tags that have no text content on one side
   $('p, div').find('br').each(function() {
     const $br = $(this);
-    const $parent = $br.parent();
-    
-    // Get all text before and after the br within the paragraph
-    const $p = $br.closest('p, div');
-    if (!$p.length) return;
-    
-    // Get the HTML and split by the br to check if there's text on both sides
-    let html = $p.html() || '';
+    if (!$br.closest('p, div').length) return;
     
     // Check if there's any actual text before this br (excluding tags)
     let beforeBr = '';
-    let currentNode = $br[0];
+    let currentNode: AnyNode | null = $br[0];
     
     // Walk backwards through siblings and parents to get text before br
     while (currentNode) {
@@ -770,7 +773,7 @@ function cleanupBrTags($: cheerio.CheerioAPI): void {
       }
       
       // Move up to parent if not at paragraph level
-      currentNode = currentNode.parentNode as any;
+      currentNode = currentNode.parentNode;
       if (!currentNode || $(currentNode).is('p, div')) {
         break;
       }
@@ -793,7 +796,7 @@ function cleanupBrTags($: cheerio.CheerioAPI): void {
       }
       
       // Move up to parent if not at paragraph level
-      currentNode = currentNode.parentNode as any;
+      currentNode = currentNode.parentNode;
       if (!currentNode || $(currentNode).is('p, div')) {
         break;
       }
@@ -865,7 +868,7 @@ function removeAllEmptyElements($: cheerio.CheerioAPI): void {
  */
 function trimTrailingEmptyElements($: cheerio.CheerioAPI): void {
   const body = $('body');
-  let children = body.children();
+  const children = body.children();
   
   // Work backwards from the end, removing empty elements
   for (let i = children.length - 1; i >= 0; i--) {
@@ -906,19 +909,30 @@ function trimTrailingEmptyElements($: cheerio.CheerioAPI): void {
  * Generates the final HTML with styling for PDF generation
  */
 function generateStyledHtml(bodyContent: string, options: CleanHtmlOptions, title: string = '', author: string = ''): string {
+  const m = (value: number) => `${value}${options.marginUnit}`;
+  const runningHeader = (text: string, italic: boolean) => `
+          @top-center {
+            content: "${text.replace(/"/g, '\\"')}";
+            font-size: ${options.fontSize * 0.8}pt;
+            font-family: 'Garamond', 'Times New Roman', serif;
+            ${italic ? 'font-style: italic;' : ''}
+            margin-bottom: -0.15in;
+          }`;
+
   return `
     <!DOCTYPE html>
     <html>
     <head>
       <meta charset="UTF-8">
       <style>
-        ${!options.useAlternatingMargins ? `
         @page {
           size: ${options.pageWidth}${options.pageUnit} ${options.pageHeight}${options.pageUnit};
-          margin-top: ${options.marginTop}${options.marginUnit};
-          margin-right: ${options.marginRight}${options.marginUnit};
-          margin-bottom: ${options.marginBottom}${options.marginUnit};
-          margin-left: ${options.marginLeft}${options.marginUnit};
+          margin-top: ${m(options.marginTop)};
+          margin-bottom: ${m(options.marginBottom)};
+          ${!options.useAlternatingMargins ? `
+          margin-left: ${m(options.marginLeft)};
+          margin-right: ${m(options.marginRight)};
+          ` : ''}
           ${options.showPageNumbers ? `
           @bottom-center {
             content: counter(page);
@@ -928,74 +942,25 @@ function generateStyledHtml(bodyContent: string, options: CleanHtmlOptions, titl
           }
           ` : ''}
         }
-        
-        ${options.showHeaders ? `
-        /* Left pages (even) - show author */
+
+        /* Left pages (even): author header; outer margin on the left when alternating */
         @page :left {
-          @top-center {
-            content: "${author.replace(/"/g, '\\"')}";
-            font-size: ${options.fontSize * 0.8}pt;
-            font-family: 'Garamond', 'Times New Roman', serif;
-            margin-bottom: -0.2in;
-          }
+          ${options.useAlternatingMargins ? `
+          margin-left: ${m(options.outerMargin)};
+          margin-right: ${m(options.innerMargin)};
+          ` : ''}
+          ${options.showHeaders ? runningHeader(author, false) : ''}
         }
-        
-        /* Right pages (odd) - show title */
+
+        /* Right pages (odd): title header; inner margin on the left when alternating */
         @page :right {
-          @top-center {
-            content: "${title.replace(/"/g, '\\"')}";
-            font-size: ${options.fontSize * 0.8}pt;
-            font-family: 'Garamond', 'Times New Roman', serif;
-            font-style: italic;
-            margin-bottom: -0.15in;
-          }
-        }
-        ` : ''}
-        ` : `
-        @page {
-          size: ${options.pageWidth}${options.pageUnit} ${options.pageHeight}${options.pageUnit};
-          margin-top: ${options.marginTop}${options.marginUnit};
-          margin-bottom: ${options.marginBottom}${options.marginUnit};
-          ${options.showPageNumbers ? `
-          @bottom-center {
-            content: counter(page);
-            font-size: ${options.fontSize * 0.9}pt;
-            font-family: 'Garamond', 'Times New Roman', serif;
-            margin-top: -0.25in;
-          }
+          ${options.useAlternatingMargins ? `
+          margin-left: ${m(options.innerMargin)};
+          margin-right: ${m(options.outerMargin)};
           ` : ''}
+          ${options.showHeaders ? runningHeader(title, true) : ''}
         }
-        
-        /* Left pages (even) - outer margin on left, inner on right */
-        @page :left {
-          margin-left: ${options.outerMargin}${options.marginUnit};
-          margin-right: ${options.innerMargin}${options.marginUnit};
-          ${options.showHeaders ? `
-          @top-center {
-            content: "${author.replace(/"/g, '\\"')}";
-            font-size: ${options.fontSize * 0.8}pt;
-            font-family: 'Garamond', 'Times New Roman', serif;
-            margin-bottom: -0.15in;
-          }
-          ` : ''}
-        }
-        
-        /* Right pages (odd) - inner margin on left, outer on right */
-        @page :right {
-          margin-left: ${options.innerMargin}${options.marginUnit};
-          margin-right: ${options.outerMargin}${options.marginUnit};
-          ${options.showHeaders ? `
-          @top-center {
-            content: "${title.replace(/"/g, '\\"')}";
-            font-size: ${options.fontSize * 0.8}pt;
-            font-family: 'Garamond', 'Times New Roman', serif;
-            font-style: italic;
-            margin-bottom: -0.15in;
-          }
-          ` : ''}
-        }
-        `}
-        
+
         ${(options.showPageNumbers && options.hidePageNumbersUntilChapter1) || (options.showHeaders && options.hideHeadersUntilChapter1) ? `
         /* Hide page numbers and/or headers until Chapter 1 */
         .title-page,
@@ -1090,14 +1055,14 @@ function generateStyledHtml(bodyContent: string, options: CleanHtmlOptions, titl
           page-break-before: always;
         }
         
-        /* Chapter headings start 1/3 down the page */
+        /* Chapter headings start 1/4 down the page */
         .chapter h1,
         .chapter h2,
         .chapter h3,
         .chapter .title,
         h2[class*="chapter"],
         h3[class*="chapter"] {
-          padding-top: 33vh;
+          padding-top: 25vh;
         }
         
         /* First heading in a chapter div */
@@ -1105,13 +1070,13 @@ function generateStyledHtml(bodyContent: string, options: CleanHtmlOptions, titl
         .chapter > h2:first-child,
         .chapter > h3:first-child,
         .chapter > .title:first-child {
-          padding-top: 33vh;
+          padding-top: 25vh;
           margin-bottom: 2rem;
         }
         
         /* New chapter heading wrapper format */
         .chapter-heading-wrapper {
-          padding-top: 33vh;
+          padding-top: 25vh;
           text-align: center;
           font-size: ${options.fontSize * 1.5}pt;
           page-break-after: avoid;

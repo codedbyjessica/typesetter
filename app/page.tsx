@@ -5,6 +5,36 @@ import { Checkbox, NumberInput, TextInput, RangeSlider, SectionHeader } from './
 import { PageMarginPreview } from './components/PageMarginPreview';
 import { PreviewModal } from './components/PreviewModal';
 
+const PREVIEW_PAGES = 5;
+
+type StoryMetadata = { wordCount?: string; fandom?: string; warning?: string; publishDate?: string; completedDate?: string; ao3Url?: string };
+
+interface RadioGroupProps {
+  name: string;
+  value: boolean;
+  onChange: (value: boolean) => void;
+  falseLabel: string;
+  trueLabel: string;
+}
+
+// Two radio options backed by a boolean (used for "show on all pages / hide until Chapter 1").
+const RadioGroup = ({ name, value, onChange, falseLabel, trueLabel }: RadioGroupProps) => (
+  <div className="ml-6 mt-3 space-y-2">
+    {[false, true].map((option) => (
+      <label key={String(option)} className="flex items-center gap-2 cursor-pointer">
+        <input
+          type="radio"
+          name={name}
+          checked={value === option}
+          onChange={() => onChange(option)}
+          className="w-4 h-4 text-slate-700 focus:ring-2 focus:ring-slate-500"
+        />
+        <span className="text-sm text-slate-700">{option ? trueLabel : falseLabel}</span>
+      </label>
+    ))}
+  </div>
+);
+
 export default function Home() {
   // Color palette for sections - easily customizable
   const colors = {
@@ -35,17 +65,17 @@ export default function Home() {
   const [downloadFormat, setDownloadFormat] = useState<'pdf' | 'html'>('pdf');
   const [showOverrideSection, setShowOverrideSection] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
-  const [previewHtml, setPreviewHtml] = useState<string>('');
+  const [previewUrl, setPreviewUrl] = useState<string>('');
   const [uploadedFileName, setUploadedFileName] = useState<string>('');
   const [metadataLoaded, setMetadataLoaded] = useState(false);
-  const [metadata, setMetadata] = useState<{ wordCount?: string; fandom?: string; warning?: string; publishDate?: string; completedDate?: string; ao3Url?: string }>({});
+  const [metadata, setMetadata] = useState<StoryMetadata>({});
   
   // Structured settings state
   const [settings, setSettings] = useState({
     // Content cleaning
     removeEndnotes: true,
     removeImages: true,
-    removeFootnotes: true,
+    removeAfterword: true,
     removeChapterNotes: true,
     removeSummary: true,
     
@@ -98,7 +128,7 @@ export default function Home() {
     { key: 'removeSummary' as const, label: 'Remove summary' },
     { key: 'removeChapterNotes' as const, label: 'Remove chapter notes' },
     { key: 'removeEndnotes' as const, label: 'Remove chapter endnotes' },
-    { key: 'removeFootnotes' as const, label: 'Remove afterword' },
+    { key: 'removeAfterword' as const, label: 'Remove afterword' },
     { key: 'removeImages' as const, label: 'Remove images' },
   ];
 
@@ -126,6 +156,31 @@ export default function Home() {
     
     return safeName ? `${safeName}_typeset.${extension}` : `typeset.${extension}`;
   };
+  // Fetched and uploaded HTML both land here, so they go through the exact same processing.
+  const loadStory = async (rawHtml: string, sourceUrl?: string) => {
+    const { processAO3Html } = await import('@/lib/html-cleaner');
+    const { html, title, author, ...storyMetadata } = processAO3Html(rawHtml, sourceUrl);
+    setHtmlContent(html);
+    updateSetting('customTitle', title);
+    updateSetting('customAuthor', author);
+    setMetadata(storyMetadata);
+    setMetadataLoaded(true);
+  };
+
+  // Settings plus the story's metadata (word count, fandom, dates…) for the copyright page.
+  const buildOptions = () => ({ ...settings, ...metadata });
+
+  const downloadBlob = (blob: Blob, filename: string) => {
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    window.URL.revokeObjectURL(url);
+    document.body.removeChild(link);
+  };
+
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -134,7 +189,7 @@ export default function Home() {
     const validTypes = ['text/html', 'application/xhtml+xml'];
     const validExtensions = ['.html', '.htm', '.xhtml'];
     const fileExtension = file.name.toLowerCase().substring(file.name.lastIndexOf('.'));
-    
+
     if (!validTypes.includes(file.type) && !validExtensions.includes(fileExtension)) {
       setError('Please upload a valid HTML file (.html, .htm, or .xhtml)');
       e.target.value = ''; // Reset file input
@@ -144,57 +199,29 @@ export default function Home() {
     setLoading(true);
     setError('');
 
-    const reader = new FileReader();
-    reader.onload = async (event) => {
-      const content = event.target?.result as string;
-      
+    try {
+      const content = await file.text();
+
       // Validate it's actually HTML content
-      if (!content.trim().toLowerCase().includes('<html') && !content.trim().toLowerCase().includes('<!doctype')) {
+      const lower = content.trim().toLowerCase();
+      if (!lower.includes('<html') && !lower.includes('<!doctype')) {
         setError('The uploaded file does not appear to be valid HTML');
         e.target.value = '';
-        setLoading(false);
         return;
       }
-      
-      try {
-        // Process through the same function as AO3 fetch
-        const { processAO3Html, extractTitleAuthorFromHtml } = await import('@/lib/html-cleaner');
-        const { html, title: extractedTitle, author: extractedAuthor, wordCount, fandom, warning, publishDate, completedDate, ao3Url } = processAO3Html(content);
-        const fallback = extractTitleAuthorFromHtml(html);
-        const title = extractedTitle || fallback.title;
-        const author = extractedAuthor || fallback.author;
-        
-        setHtmlContent(html);
-        setError('');
-        setUploadedFileName(file.name);
-        setMetadataLoaded(false);
-        
-        // Auto-populate title and author
-        updateSetting('customTitle', title);
-        updateSetting('customAuthor', author);
-        setMetadata({ wordCount, fandom, warning, publishDate, completedDate, ao3Url });
-        setMetadataLoaded(true);
-        
-        // Clear AO3 URL since we're now using uploaded file
-        setAo3Url('');
-      } catch (err) {
-        console.error('Error processing uploaded HTML:', err);
-        setError('Failed to process HTML file');
-        e.target.value = '';
-      } finally {
-        setLoading(false);
-      }
-    };
-    
-    reader.onerror = () => {
-      setError('Failed to read file');
-      e.target.value = '';
-      setLoading(false);
-    };
-    
-    reader.readAsText(file);
-  };
 
+      await loadStory(content);
+      setUploadedFileName(file.name);
+      // Clear AO3 URL since we're now using uploaded file
+      setAo3Url('');
+    } catch (err) {
+      console.error('Error processing uploaded HTML:', err);
+      setError('Failed to process HTML file');
+      e.target.value = '';
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleAo3Fetch = async () => {
     if (!ao3Url) {
@@ -224,26 +251,14 @@ export default function Home() {
         throw new Error(message || 'Failed to fetch from AO3');
       }
 
-      const data = await response.json();
-      setHtmlContent(data.html);
+      await loadStory(await response.text(), ao3Url);
 
-      const { extractTitleAuthorFromHtml } = await import('@/lib/html-cleaner');
-      const fallback = extractTitleAuthorFromHtml(data.html);
-      const title = data.title || fallback.title;
-      const author = data.author || fallback.author;
-      
       // Clear any uploaded file input
       const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
       if (fileInput) {
         fileInput.value = '';
       }
       setUploadedFileName('');
-      
-      // Use title/author from API (already extracted by shared processAO3Html function)
-      updateSetting('customTitle', title);
-      updateSetting('customAuthor', author);
-      setMetadata({ wordCount: data.wordCount, fandom: data.fandom, warning: data.warning, publishDate: data.publishDate, completedDate: data.completedDate, ao3Url: data.ao3Url });
-      setMetadataLoaded(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to fetch from AO3');
     } finally {
@@ -261,60 +276,19 @@ export default function Home() {
     setError('');
 
     try {
-      const { cleanHtml, extractMetadataFromHtml } = await import('@/lib/html-cleaner');
-      const extracted = extractMetadataFromHtml(htmlContent);
-      const options = {
-        ...settings,
-        ...extracted,
-        ...metadata,
-        wordCount: metadata.wordCount || extracted.wordCount,
-        fandom: metadata.fandom || extracted.fandom,
-        warning: metadata.warning || extracted.warning,
-        publishDate: metadata.publishDate || extracted.publishDate,
-        completedDate: metadata.completedDate || extracted.completedDate,
-        ao3Url: metadata.ao3Url || extracted.ao3Url,
-      };
+      const { cleanHtml } = await import('@/lib/html-cleaner');
+      const options = buildOptions();
+      const cleanedHtml = cleanHtml(htmlContent, options);
 
       if (downloadFormat === 'pdf') {
         const { generatePdf } = await import('@/lib/pdf-generator');
-
-        const cleanedHtml = cleanHtml(htmlContent, options);
         const pdfBytes = await generatePdf(cleanedHtml, options);
-        const pdfBlob = new Blob([pdfBytes as unknown as BlobPart], { type: 'application/pdf' });
-        const pdfUrl = window.URL.createObjectURL(pdfBlob);
-        const pdfLink = document.createElement('a');
-        pdfLink.href = pdfUrl;
-        pdfLink.download = getFilename('pdf');
-        document.body.appendChild(pdfLink);
-        pdfLink.click();
-        window.URL.revokeObjectURL(pdfUrl);
-        document.body.removeChild(pdfLink);
+        downloadBlob(new Blob([pdfBytes as BlobPart], { type: 'application/pdf' }), getFilename('pdf'));
       } else {
-        // Download cleaned HTML
-        const htmlResponse = await fetch('/api/preview-html', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            html: htmlContent,
-            options,
-          }),
-        });
-
-        if (!htmlResponse.ok) {
-          throw new Error('Failed to generate HTML');
-        }
-
-        const htmlBlob = await htmlResponse.blob();
-        const htmlUrl = window.URL.createObjectURL(htmlBlob);
-        const htmlLink = document.createElement('a');
-        htmlLink.href = htmlUrl;
-        htmlLink.download = getFilename('html');
-        document.body.appendChild(htmlLink);
-        htmlLink.click();
-        window.URL.revokeObjectURL(htmlUrl);
-        document.body.removeChild(htmlLink);
+        downloadBlob(new Blob([cleanedHtml], { type: 'text/html;charset=utf-8' }), getFilename('html'));
       }
     } catch (err) {
+      console.error('Error generating file:', err);
       setError(err instanceof Error ? err.message : 'Failed to generate file');
     } finally {
       setLoading(false);
@@ -331,37 +305,16 @@ export default function Home() {
     setError('');
 
     try {
-      const { extractMetadataFromHtml } = await import('@/lib/html-cleaner');
-      const extracted = extractMetadataFromHtml(htmlContent);
-      const options = {
-        ...settings,
-        ...extracted,
-        ...metadata,
-        wordCount: metadata.wordCount || extracted.wordCount,
-        fandom: metadata.fandom || extracted.fandom,
-        warning: metadata.warning || extracted.warning,
-        publishDate: metadata.publishDate || extracted.publishDate,
-        completedDate: metadata.completedDate || extracted.completedDate,
-        ao3Url: metadata.ao3Url || extracted.ao3Url,
-      };
-
-      const htmlResponse = await fetch('/api/preview-html', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          html: htmlContent,
-          options,
-        }),
-      });
-
-      if (!htmlResponse.ok) {
-        throw new Error('Failed to generate preview');
-      }
-
-      const htmlText = await htmlResponse.text();
-      setPreviewHtml(htmlText);
+      const { cleanHtml } = await import('@/lib/html-cleaner');
+      const { generatePdf } = await import('@/lib/pdf-generator');
+      const options = buildOptions();
+      // Same layout as the real PDF, stopped after the first pages
+      const pdfBytes = await generatePdf(cleanHtml(htmlContent, options), options, PREVIEW_PAGES);
+      if (previewUrl) window.URL.revokeObjectURL(previewUrl);
+      setPreviewUrl(window.URL.createObjectURL(new Blob([pdfBytes as BlobPart], { type: 'application/pdf' })));
       setShowPreview(true);
     } catch (err) {
+      console.error('Error generating preview:', err);
       setError(err instanceof Error ? err.message : 'Failed to generate preview');
     } finally {
       setLoading(false);
@@ -489,21 +442,21 @@ export default function Home() {
                     />
                   </div>
                   
-                  {!settings.useAlternatingMargins ? (
-                    <div className="grid grid-cols-2 gap-2 mb-3">
-                      <NumberInput label="Top" value={settings.marginTop} onChange={(value) => updateSetting('marginTop', value)} />
-                      <NumberInput label="Bottom" value={settings.marginBottom} onChange={(value) => updateSetting('marginBottom', value)} />
-                      <NumberInput label="Left" value={settings.marginLeft} onChange={(value) => updateSetting('marginLeft', value)} />
-                      <NumberInput label="Right" value={settings.marginRight} onChange={(value) => updateSetting('marginRight', value)} />
-                    </div>
-                  ) : (
-                    <div className="grid grid-cols-2 gap-2 mb-3">
-                      <NumberInput label="Top" value={settings.marginTop} onChange={(value) => updateSetting('marginTop', value)} />
-                      <NumberInput label="Bottom" value={settings.marginBottom} onChange={(value) => updateSetting('marginBottom', value)} />
-                      <NumberInput label="Inner (binding)" value={settings.innerMargin} onChange={(value) => updateSetting('innerMargin', value)} />
-                      <NumberInput label="Outer (edge)" value={settings.outerMargin} onChange={(value) => updateSetting('outerMargin', value)} />
-                    </div>
-                  )}
+                  <div className="grid grid-cols-2 gap-2 mb-3">
+                    <NumberInput label="Top" value={settings.marginTop} onChange={(value) => updateSetting('marginTop', value)} />
+                    <NumberInput label="Bottom" value={settings.marginBottom} onChange={(value) => updateSetting('marginBottom', value)} />
+                    {!settings.useAlternatingMargins ? (
+                      <>
+                        <NumberInput label="Left" value={settings.marginLeft} onChange={(value) => updateSetting('marginLeft', value)} />
+                        <NumberInput label="Right" value={settings.marginRight} onChange={(value) => updateSetting('marginRight', value)} />
+                      </>
+                    ) : (
+                      <>
+                        <NumberInput label="Inner (binding)" value={settings.innerMargin} onChange={(value) => updateSetting('innerMargin', value)} />
+                        <NumberInput label="Outer (edge)" value={settings.outerMargin} onChange={(value) => updateSetting('outerMargin', value)} />
+                      </>
+                    )}
+                  </div>
                   
                   <div className="flex items-center gap-2">
                     <select
@@ -514,7 +467,7 @@ export default function Home() {
                       <option value="in">inches</option>
                       <option value="cm">cm</option>
                     </select>
-                    <p className="text-xs text-slate-500">Default: 1 in all sides</p>
+                    <p className="text-xs text-slate-500">Default: 0.5 in all sides</p>
                   </div>
                 </div>
 
@@ -654,6 +607,7 @@ export default function Home() {
                     onChange={(value) => updateSetting('fontSize', value)}
                     min={6}
                     max={16}
+                    step={0.5}
                   />
                   <RangeSlider
                     label="Line Spacing"
@@ -688,32 +642,13 @@ export default function Home() {
                       label="Show Headers (title on odd pages, author on even pages)"
                     />
                     {settings.showHeaders && (
-                      <div className="ml-6 mt-3 space-y-2">
-                        <label className="flex items-center gap-2 cursor-pointer">
-                          <input
-                            type="radio"
-                            name="headerOption"
-                            checked={!settings.hideHeadersUntilChapter1}
-                            onChange={() => {
-                              updateSetting('hideHeadersUntilChapter1', false);
-                            }}
-                            className="w-4 h-4 text-slate-700 focus:ring-2 focus:ring-slate-500"
-                          />
-                          <span className="text-sm text-slate-700">Show on all pages</span>
-                        </label>
-                        <label className="flex items-center gap-2 cursor-pointer">
-                          <input
-                            type="radio"
-                            name="headerOption"
-                            checked={settings.hideHeadersUntilChapter1}
-                            onChange={() => {
-                              updateSetting('hideHeadersUntilChapter1', true);
-                            }}
-                            className="w-4 h-4 text-slate-700 focus:ring-2 focus:ring-slate-500"
-                          />
-                          <span className="text-sm text-slate-700">Hide until Chapter 1</span>
-                        </label>
-                      </div>
+                      <RadioGroup
+                        name="headerOption"
+                        value={settings.hideHeadersUntilChapter1}
+                        onChange={(value) => updateSetting('hideHeadersUntilChapter1', value)}
+                        falseLabel="Show on all pages"
+                        trueLabel="Hide until Chapter 1"
+                      />
                     )}
                   </div>
                   
@@ -725,32 +660,13 @@ export default function Home() {
                       label="Show Page Numbers"
                     />
                     {settings.showPageNumbers && (
-                      <div className="ml-6 mt-3 space-y-2">
-                        <label className="flex items-center gap-2 cursor-pointer">
-                          <input
-                            type="radio"
-                            name="pageNumberOption"
-                            checked={!settings.hidePageNumbersUntilChapter1}
-                            onChange={() => {
-                              updateSetting('hidePageNumbersUntilChapter1', false);
-                            }}
-                            className="w-4 h-4 text-slate-700 focus:ring-2 focus:ring-slate-500"
-                          />
-                          <span className="text-sm text-slate-700">Start from page 1</span>
-                        </label>
-                        <label className="flex items-center gap-2 cursor-pointer">
-                          <input
-                            type="radio"
-                            name="pageNumberOption"
-                            checked={settings.hidePageNumbersUntilChapter1}
-                            onChange={() => {
-                              updateSetting('hidePageNumbersUntilChapter1', true);
-                            }}
-                            className="w-4 h-4 text-slate-700 focus:ring-2 focus:ring-slate-500"
-                          />
-                          <span className="text-sm text-slate-700">Hide until Chapter 1 (shows actual page #)</span>
-                        </label>
-                      </div>
+                      <RadioGroup
+                        name="pageNumberOption"
+                        value={settings.hidePageNumbersUntilChapter1}
+                        onChange={(value) => updateSetting('hidePageNumbersUntilChapter1', value)}
+                        falseLabel="Start from page 1"
+                        trueLabel="Hide until Chapter 1 (shows actual page #)"
+                      />
                     )}
                   </div>
                   
@@ -788,7 +704,7 @@ export default function Home() {
                 />
                 <div>
                   <span className="text-slate-700 font-medium">HTML</span>
-                  <p className="text-sm text-slate-500">Preview cleaned HTML</p>
+                  <p className="text-sm text-slate-500">Download cleaned HTML</p>
                 </div>
               </label>
             </div>
@@ -825,7 +741,7 @@ export default function Home() {
       <PreviewModal 
         isOpen={showPreview}
         onClose={() => setShowPreview(false)}
-        htmlContent={previewHtml}
+        pdfUrl={previewUrl}
       />
     </div>
   );

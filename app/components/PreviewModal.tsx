@@ -1,10 +1,10 @@
 interface PreviewModalProps {
   isOpen: boolean;
   onClose: () => void;
-  htmlContent: string;
+  pdfUrl: string;
 }
 
-export const PreviewModal = ({ isOpen, onClose, htmlContent }: PreviewModalProps) => {
+export const PreviewModal = ({ isOpen, onClose, pdfUrl }: PreviewModalProps) => {
   if (!isOpen) return null;
 
   return (
@@ -30,7 +30,7 @@ export const PreviewModal = ({ isOpen, onClose, htmlContent }: PreviewModalProps
         {/* Modal Content */}
         <div className="flex-1 overflow-hidden p-6">
           <iframe
-            srcDoc={htmlContent}
+            src={pdfUrl}
             className="w-full h-full border border-slate-200 rounded-lg bg-white"
             title="Preview"
           />

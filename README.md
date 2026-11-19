@@ -7,7 +7,7 @@ A modern web application for creating beautiful PDF typesets from HTML files or 
 - 📄 **Upload HTML Files** - Upload any HTML file to convert to PDF
 - 📚 **Fetch from AO3** - Pull stories directly from Archive of Our Own
 - 🧹 **Content Cleaning** - Remove endnotes, footnotes, and images
-- ✨ **Customizable Formatting** - Adjust font size (8-20pt)
+- ✨ **Customizable Formatting** - Adjust font size (6-16pt, in 0.5pt steps)
 - 📖 **Chapter Page Breaks** - Automatically add page breaks between chapters
 - 🎨 **Beautiful UI** - Modern, responsive interface built with Tailwind CSS
 
@@ -57,10 +57,10 @@ npm run dev
 
 **Page Size & Margins:**
 - Page Size - Customize page width and height in inches or centimeters (default: 5.5 × 8.5 in)
-- Margins - Set individual margins for top, right, bottom, and left in inches or cm (default: 1 in all sides)
+- Margins - Set individual margins for top, right, bottom, and left in inches or cm (default: 0.5 in all sides), or separate inner/outer margins for binding
 
 **Formatting:**
-- Font Size - Adjust from 6pt to 16pt
+- Font Size - Adjust from 6pt to 16pt in 0.5pt steps
 - Add page breaks after chapters - Automatically inserts page breaks between chapters
 - Indent paragraphs - Adds a 2em indent to the first line of each paragraph
 - Remove spacing between paragraphs - Removes the spacing between paragraphs (works well with indentation)
@@ -71,18 +71,18 @@ npm run dev
 1. Once content is loaded and settings are configured
 2. Choose your download format:
    - **PDF** (default) - Generate the final formatted PDF document
-   - **HTML** - Download the cleaned HTML for debugging/preview
-3. Click the "Generate PDF" or "Generate HTML" button
-4. The selected file will be automatically downloaded
+   - **HTML** - Download the cleaned HTML for debugging
+3. Optionally click "Preview First 5 Pages" to see the start of the real PDF
+4. Click the "Generate PDF" or "Generate HTML" button
+5. The selected file will be automatically downloaded
 
 ## Technologies Used
 
 - **Next.js 16** - React framework
 - **TypeScript** - Type safety
 - **Tailwind CSS** - Styling
-- **Puppeteer** - PDF generation
+- **pdf-lib** + **@pdf-lib/fontkit** - PDF generation in the browser (EB Garamond)
 - **Cheerio** - HTML parsing and cleaning
-- **Axios** - HTTP requests
 
 ## Project Structure
 
@@ -90,23 +90,24 @@ npm run dev
 typesetter/
 ├── app/
 │   ├── api/
-│   │   ├── fetch-ao3/      # API route for fetching AO3 content
-│   │   ├── generate-pdf/   # API route for PDF generation
-│   │   └── preview-html/   # API route for cleaned HTML preview
+│   │   └── fetch-ao3/      # Proxies the raw AO3 page (AO3 blocks cross-origin requests)
+│   ├── components/         # Form controls, margin preview, preview modal
 │   ├── page.tsx            # Main UI component
 │   └── layout.tsx          # Root layout
 ├── lib/
-│   └── html-cleaner.ts     # HTML cleaning and formatting utilities
-├── public/                 # Static assets
+│   ├── html-cleaner.ts     # HTML processing, cleaning, and copyright-page content
+│   └── pdf-generator.ts    # Client-side PDF layout with pdf-lib
+├── public/fonts/           # EB Garamond (regular, bold, italic, bold italic)
 └── package.json           # Dependencies
 ```
 
 ## Notes
 
-- AO3 fetching works by adding `?view_full_work=true` to the URL to get the complete story in one page
-- PDF generation uses Puppeteer with headless Chrome for high-quality output
-- Default page size is 5.5 × 8.5 inches (Half Letter) with 1-inch margins, but fully customizable
-- Serif fonts (Georgia) are used for body text, sans-serif (Helvetica) for headings
+- AO3 fetching adds `view_full_work=true` and `view_adult=true` to the URL to get the complete story in one page
+- Fetched and uploaded HTML go through the same processing in the browser
+- PDFs are generated entirely in the browser with pdf-lib; nothing is sent to a server except the AO3 URL
+- Default page size is 5.5 × 8.5 inches (Half Letter) with 0.5-inch margins, but fully customizable
+- EB Garamond is used for all PDF text
 - Center-aligned elements are automatically detected and preserved, even with paragraph indentation or justification enabled
 - "Chapter Text" headings from AO3 are automatically removed
 - All hyperlinks are automatically converted to plain text (links removed but content preserved)

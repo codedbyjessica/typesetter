@@ -1,6 +1,6 @@
 import { PDFDocument, StandardFonts, PDFFont, PDFPage, rgb } from 'pdf-lib';
 import fontkit from '@pdf-lib/fontkit';
-import type { CleanHtmlOptions } from './html-cleaner';
+import { buildCopyrightItems, type CleanHtmlOptions } from './html-cleaner';
 
 const PT_PER_IN = 72;
 const PT_PER_CM = PT_PER_IN / 2.54;
@@ -10,21 +10,14 @@ const FOOTER_SPACE = 14;
 const toPoints = (value: number, unit: 'in' | 'cm'): number =>
   unit === 'in' ? value * PT_PER_IN : value * PT_PER_CM;
 
-// Draw text one character at a time to prevent OpenType GSUB ligature substitution.
-// When fontkit sees "fl" together it substitutes the fl-ligature glyph, but pdf-lib's
-// ToUnicode CMap can map that glyph back to a wrong character (e.g. "ξ" instead of "fl").
-// Drawing each character individually sidesteps the substitution entirely.
+// Ligatures are disabled when the fonts are embedded (see FONT_OPTIONS): pdf-lib's
+// ToUnicode CMap maps ligature glyphs back to the wrong characters (e.g. "ξ" for "fl").
 const drawChars = (page: PDFPage, text: string, x: number, y: number, font: PDFFont, size: number): void => {
-  let cx = x;
-  for (const char of text) {
-    page.drawText(char, { x: cx, y, size, font, color: rgb(0, 0, 0) });
-    cx += font.widthOfTextAtSize(char, size);
-  }
+  page.drawText(text, { x, y, size, font, color: rgb(0, 0, 0) });
 };
 
-// Width must be calculated the same way we draw: sum of individual character widths.
 const charWidth = (text: string, font: PDFFont, size: number): number =>
-  [...text].reduce((sum, char) => sum + font.widthOfTextAtSize(char, size), 0);
+  font.widthOfTextAtSize(text, size);
 
 // ─── Font helpers ────────────────────────────────────────────────────────────
 
@@ -238,7 +231,11 @@ interface LayoutContext {
   pageIsFresh: boolean;
   storyStarted: boolean;
   lastBlockCentered: boolean;
+  maxPages?: number;
 }
+
+// Thrown to stop layout early once maxPages is reached (used for previews).
+class PageLimitReached extends Error {}
 
 const getMargins = (pageIndex: number, options: CleanHtmlOptions) => {
   const top = toPoints(options.marginTop, options.marginUnit);
@@ -302,6 +299,7 @@ const drawHeaderFooter = (ctx: LayoutContext) => {
 
 const newPage = (ctx: LayoutContext) => {
   drawHeaderFooter(ctx);
+  if (ctx.maxPages !== undefined && ctx.pageIndex + 1 >= ctx.maxPages) throw new PageLimitReached();
   // Chapter 1 = first story page (the page after our inserted blank page).
   // Enable headers/footers only after leaving front matter, not on the blank page itself.
   if (ctx.storyStarted && !ctx.reachedChapterOne) ctx.reachedChapterOne = true;
@@ -325,6 +323,9 @@ const ensureSpace = (ctx: LayoutContext, neededHeight: number) => {
 };
 
 // ─── High-level paragraph drawing ────────────────────────────────────────────
+
+// Chapter headings start this fraction of the way down the content area.
+const CHAPTER_HEADING_OFFSET = 0.25;
 
 const CENTERED_BLOCK_EXTRA = 1.0; // extra spacing (× fontSize) before/after a centered block
 
@@ -488,100 +489,6 @@ const wrapTextToLines = (text: string, font: PDFFont, fontSize: number, maxWidth
   return lines;
 };
 
-// Parse copyright lines directly from the cleaned HTML string (matches what you see in preview).
-const parseCopyrightItemsFromHtml = (html: string): { text: string; bold: boolean }[] => {
-  const sectionMatch = html.match(/<div class="blank-page-after-title"[^>]*>([\s\S]*?)<\/div>/i);
-  const section = sectionMatch?.[1] ?? '';
-  if (!section) return [];
-
-  const items: { text: string; bold: boolean }[] = [];
-  const re = /<p\s+class="copyright-item([^"]*)"[^>]*>([\s\S]*?)<\/p>/gi;
-  let match: RegExpExecArray | null;
-  while ((match = re.exec(section)) !== null) {
-    const text = match[2].replace(/<[^>]+>/g, '').trim();
-    if (!text) continue;
-    items.push({
-      text,
-      bold: /copyright-title|copyright-author/.test(match[1]),
-    });
-  }
-  return items;
-};
-
-const collectCopyrightItemsFromBody = (body: Element): { text: string; bold: boolean }[] => {
-  const items: { text: string; bold: boolean }[] = [];
-  const seen = new Set<string>();
-
-  const add = (el: Element) => {
-    const text = el.textContent?.trim() ?? '';
-    if (!text || seen.has(text)) return;
-    seen.add(text);
-    items.push({
-      text,
-      bold: el.classList.contains('copyright-title') || el.classList.contains('copyright-author'),
-    });
-  };
-
-  const blank = body.querySelector('.blank-page-after-title');
-  if (blank) {
-    blank.querySelectorAll('.copyright-item').forEach(add);
-    // Items can end up as siblings if HTML parsing breaks the wrapper div
-    let sib = blank.nextElementSibling;
-    while (sib?.classList.contains('copyright-item')) {
-      add(sib);
-      sib = sib.nextElementSibling;
-    }
-  }
-
-  return items;
-};
-
-const enrichOptionsFromBody = (options: CleanHtmlOptions, body: Element): CleanHtmlOptions => {
-  const meta = body.querySelector('#typesetter-metadata');
-  if (!meta) return options;
-  return {
-    ...options,
-    wordCount: options.wordCount || meta.getAttribute('data-word-count') || '',
-    fandom: options.fandom || meta.getAttribute('data-fandom') || '',
-    warning: options.warning || meta.getAttribute('data-warning') || '',
-    publishDate: options.publishDate || meta.getAttribute('data-publish-date') || '',
-    completedDate: options.completedDate || meta.getAttribute('data-completed-date') || '',
-    ao3Url: options.ao3Url || meta.getAttribute('data-ao3-url') || '',
-  };
-};
-
-const getCopyrightItemsFromOptions = (ctx: LayoutContext): { text: string; bold: boolean }[] => {
-  const { options, title, author } = ctx;
-  const shouldShowWarning = !!options.warning && !options.warning.includes('No Archive Warnings Apply');
-  const cleanAuthor = author.replace(/^by\s+/i, '');
-  const items: { text: string; bold: boolean }[] = [];
-  if (title) items.push({ text: title, bold: true });
-  if (cleanAuthor) items.push({ text: `by ${cleanAuthor}`, bold: true });
-  if (options.fandom) items.push({ text: `Fandom: ${options.fandom}`, bold: false });
-  if (shouldShowWarning) items.push({ text: `Warning: ${options.warning!}`, bold: false });
-  if (options.wordCount) items.push({ text: `Word Count: ${options.wordCount}`, bold: false });
-  if (options.publishDate) items.push({ text: `Published: ${options.publishDate}`, bold: false });
-  if (options.completedDate) items.push({ text: `Completed: ${options.completedDate}`, bold: false });
-  if (options.ao3Url) items.push({ text: `Original URL: ${options.ao3Url}`, bold: false });
-  items.push({ text: `Typeset by yjzhang typesetter ${new Date().toISOString().split('T')[0]}`, bold: false });
-  if (options.binderName) items.push({ text: `Binded by: ${options.binderName}`, bold: false });
-  return items;
-};
-
-// Prefer whichever source has the most items — DOM partial parse was hiding metadata.
-const getCopyrightItems = (
-  ctx: LayoutContext,
-  body: Element,
-  cleanedHtml: string,
-): { text: string; bold: boolean }[] => {
-  const sources = [
-    parseCopyrightItemsFromHtml(cleanedHtml),
-    collectCopyrightItemsFromBody(body),
-    getCopyrightItemsFromOptions(ctx),
-  ];
-  return sources.reduce((best, cur) => (cur.length > best.length ? cur : best), sources[0]);
-};
-
 // ─── Page structure drawing ───────────────────────────────────────────────────
 
 const drawTitlePage = (ctx: LayoutContext, el: Element) => {
@@ -604,7 +511,7 @@ const drawTitlePage = (ctx: LayoutContext, el: Element) => {
   }
 };
 
-const drawCopyrightPage = (ctx: LayoutContext, body: Element, cleanedHtml: string) => {
+const drawCopyrightPage = (ctx: LayoutContext) => {
   newPage(ctx);
   const fontSize = ctx.options.fontSize;
   const lineHeight = fontSize * 1.2;
@@ -614,7 +521,7 @@ const drawCopyrightPage = (ctx: LayoutContext, body: Element, cleanedHtml: strin
   const maxWidth = contentWidth(ctx);
   const left = contentLeft(ctx);
 
-  const items = getCopyrightItems(ctx, body, cleanedHtml);
+  const items = buildCopyrightItems({ ...ctx.options, title: ctx.title, author: ctx.author });
   if (items.length === 0) return;
 
   let totalHeight = 0;
@@ -680,7 +587,7 @@ const drawChapterHeading = (ctx: LayoutContext, el: Element) => {
   ensureFreshPage(ctx);
   const margins = getMargins(ctx.pageIndex, ctx.options);
   const areaHeight = ctx.pageHeight - margins.top - margins.bottom;
-  ctx.y = ctx.pageHeight - margins.top - areaHeight * 0.33;
+  ctx.y = ctx.pageHeight - margins.top - areaHeight * CHAPTER_HEADING_OFFSET;
 
   const headingSize = ctx.options.fontSize * 1.5;
 
@@ -733,7 +640,7 @@ const drawHeading = (ctx: LayoutContext, el: Element, level: number) => {
     ensureFreshPage(ctx);
     const margins = getMargins(ctx.pageIndex, ctx.options);
     const areaHeight = ctx.pageHeight - margins.top - margins.bottom;
-    ctx.y = ctx.pageHeight - margins.top - areaHeight * 0.33;
+    ctx.y = ctx.pageHeight - margins.top - areaHeight * CHAPTER_HEADING_OFFSET;
   }
 
   drawMixedParagraph(ctx, el, {
@@ -772,11 +679,11 @@ const FRONT_MATTER_CLASSES = ['title-page', 'blank-page-after-title', 'half-titl
 
 const isFrontMatter = (el: Element) => FRONT_MATTER_CLASSES.some((c) => el.classList.contains(c));
 
-const drawFrontMatter = (ctx: LayoutContext, body: Element, cleanedHtml: string) => {
+const drawFrontMatter = (ctx: LayoutContext, body: Element) => {
   const titleEl = body.querySelector('.title-page');
   if (titleEl) drawTitlePage(ctx, titleEl);
 
-  drawCopyrightPage(ctx, body, cleanedHtml);
+  drawCopyrightPage(ctx);
 
   const halfEl = body.querySelector('.half-title-page');
   if (halfEl) drawHalfTitlePage(ctx, halfEl);
@@ -813,15 +720,10 @@ const processElement = (ctx: LayoutContext, el: Element) => {
 
   const tag = el.tagName.toLowerCase();
 
-  if (tag === 'h1') { drawHeading(ctx, el, 1); return; }
-  if (tag === 'h2') { drawHeading(ctx, el, 2); return; }
-  if (tag === 'h3') { drawHeading(ctx, el, 3); return; }
-  if (tag === 'h4') { drawHeading(ctx, el, 4); return; }
-  if (tag === 'h5') { drawHeading(ctx, el, 5); return; }
-  if (tag === 'h6') { drawHeading(ctx, el, 6); return; }
+  const headingMatch = /^h([1-6])$/.exec(tag);
+  if (headingMatch) { drawHeading(ctx, el, Number(headingMatch[1])); return; }
 
   if (tag === 'p') {
-    if (el.classList.contains('copyright-item')) return;
     const centered = isCenteredElement(el);
     drawMixedParagraph(ctx, el, { centered, indent: !centered });
     return;
@@ -861,7 +763,18 @@ const fetchFontBytes = async (path: string): Promise<ArrayBuffer | null> => {
   }
 };
 
-export const generatePdf = async (cleanedHtml: string, options: CleanHtmlOptions): Promise<Uint8Array> => {
+// Disable ligatures (see drawChars). Font subsetting is left off: pdf-lib's subsetter
+// drops glyphs from EB Garamond.
+const FONT_OPTIONS = { features: { liga: false } };
+
+/**
+ * Lay out cleaned HTML as a PDF. Pass maxPages to stop early (e.g. for a quick preview).
+ */
+export const generatePdf = async (
+  cleanedHtml: string,
+  options: CleanHtmlOptions,
+  maxPages?: number,
+): Promise<Uint8Array> => {
   const body = new DOMParser().parseFromString(cleanedHtml, 'text/html').body;
   const pdfDoc = await PDFDocument.create();
   pdfDoc.registerFontkit(fontkit);
@@ -875,19 +788,17 @@ export const generatePdf = async (cleanedHtml: string, options: CleanHtmlOptions
   ]);
 
   const fonts: Fonts = {
-    regular:    regularBytes    ? await pdfDoc.embedFont(regularBytes)    : await pdfDoc.embedFont(StandardFonts.TimesRoman),
-    bold:       boldBytes       ? await pdfDoc.embedFont(boldBytes)       : await pdfDoc.embedFont(StandardFonts.TimesRomanBold),
-    italic:     italicBytes     ? await pdfDoc.embedFont(italicBytes)     : await pdfDoc.embedFont(StandardFonts.TimesRomanItalic),
-    boldItalic: boldItalicBytes ? await pdfDoc.embedFont(boldItalicBytes) : await pdfDoc.embedFont(StandardFonts.TimesRomanBoldItalic),
+    regular:    regularBytes    ? await pdfDoc.embedFont(regularBytes, FONT_OPTIONS)    : await pdfDoc.embedFont(StandardFonts.TimesRoman),
+    bold:       boldBytes       ? await pdfDoc.embedFont(boldBytes, FONT_OPTIONS)       : await pdfDoc.embedFont(StandardFonts.TimesRomanBold),
+    italic:     italicBytes     ? await pdfDoc.embedFont(italicBytes, FONT_OPTIONS)     : await pdfDoc.embedFont(StandardFonts.TimesRomanItalic),
+    boldItalic: boldItalicBytes ? await pdfDoc.embedFont(boldItalicBytes, FONT_OPTIONS) : await pdfDoc.embedFont(StandardFonts.TimesRomanBoldItalic),
   };
 
   const title = options.customTitle || body.querySelector('.title-page h1')?.textContent?.trim() || body.querySelector('h1')?.textContent?.trim() || '';
   const author = (options.customAuthor || body.querySelector('.author')?.textContent?.trim() || '').replace(/^by\s+/i, '');
-  const enrichedOptions = enrichOptionsFromBody(options, body);
-
   const ctx: LayoutContext = {
     doc: pdfDoc,
-    options: enrichedOptions,
+    options,
     title,
     author,
     fonts,
@@ -900,16 +811,17 @@ export const generatePdf = async (cleanedHtml: string, options: CleanHtmlOptions
     pageIsFresh: false,
     storyStarted: false,
     lastBlockCentered: false,
+    maxPages,
   };
 
-  drawFrontMatter(ctx, body, cleanedHtml);
-  processChildren(ctx, body);
-  drawHeaderFooter(ctx);
-
-  if (pdfDoc.getPageCount() === 0) {
-    newPage(ctx);
-    drawHeaderFooter(ctx);
+  try {
+    drawFrontMatter(ctx, body);
+    processChildren(ctx, body);
+    if (pdfDoc.getPageCount() === 0) newPage(ctx);
+  } catch (err) {
+    if (!(err instanceof PageLimitReached)) throw err;
   }
+  drawHeaderFooter(ctx);
 
   return pdfDoc.save();
 };
